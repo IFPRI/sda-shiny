@@ -20,13 +20,13 @@ tmp <- hcapi.version
 hcapi.version <- packageVersion("hcapi3")
 
 # Also check if files currently exist
-f <- list.files("../assets/bulk", "*.csv", recursive=T)
+f <- list.files("../www/bulk", "*.csv", recursive=T)
 
 if( tmp!=hcapi.version | length(f)==0 ) {
   # If not, re-create
 
   # Clean up
-  unlink("../assets/bulk/*")
+  unlink("../www/bulk/*")
 
   # Package by category, omitting individual admin variables
   vi <- vi[order(cat1, cat2, cat3, varCode)][published==T]
@@ -38,19 +38,19 @@ if( tmp!=hcapi.version | length(f)==0 ) {
     for( f in c("asc", "csv", "dta") ) {
       # Generate CSV, STATA, and ESRI ASCII grid with README and TERMS
       tmp <- hcapi(vars, format=f, dir=tempdir())
-      path <- paste0("../assets/bulk/", gsub(" ", "_", tolower(i), fixed=T), "-",
+      path <- paste0("../www/bulk/", gsub(" ", "_", tolower(i), fixed=T), "-",
         format(Sys.Date(), "%y.%m.%d"), ".", f, ".zip")
       zip(path, tmp, flags="-9Xjm", zip="zip")
     }
   }
 
   # Create persistent table of download links
-  f <- list.files("../assets/bulk")
+  f <- list.files("../www/bulk/")
   t <- c("ESRI ASCII Grid (.asc)", "comma-separated values (.csv)", "STATA 12 (.dta)")
 
   hcapi.bulk <- vi[cat2 %in% cat, .(.N,
     desc = paste(paste(sample(varLabel, (min(3, length(varLabel)))), collapse="<br>"), "..."),
-    url  = paste0('<a href="http://tools.harvestchoice.org/assets/bulk/',
+    url  = paste0('<a href="http://tools.harvestchoice.org/www/bulk/',
       f[gsub("_", " ", f, fixed=T) %like% tolower(cat2)][1:3], '">', t, "</a>", collapse="<br>")
   ), keyby=.(cat1, cat2)]
 
