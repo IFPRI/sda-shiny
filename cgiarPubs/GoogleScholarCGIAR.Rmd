@@ -1,0 +1,282 @@
+---
+title:  "CGIAR co-Authorhips"
+author: "IFPRI/CIAT"
+date:   "December, 2015. Last updated on `r Sys.Date()`"
+output:
+  html_document:
+    fig_height: 8
+    fig_width: 8
+    toc: true
+    toc_float: true    
+    fig_caption: true  
+---
+
+Aim is to create a dynamic network visualization of CGIAR authors and
+co-authors showing citation details and sub-communities (key actors and
+links) with relationship strenghts representing number of co-authored papers.
+GoogleScholar (GS) does not yet provide an API yet (not an official Google
+product).
+
+Found 2 general-purpose scraping libraries `rvest` and `scrapeR`.
+`scrapeR` uses straight xpath, rvest supports `%>%` piping. Inspired from blog
+post at http://datascienceplus.com/google-scholar-scraping-with-rvest/.
+`networkD3` and `igraph` may be used to generate dynamic network graphs with
+tutorial at http://kateto.net/network-visualization.
+
+`igraph` needs 2 data.frames:
+
+* *links* - describes the edges of the network. Its first two columns are the
+  IDs of the source and the target node for each edge. The following columns are
+  edge attributes (weight, type, label, or anything else).
+* *nodes* - starts with a column of node IDs. Any following columns are
+  interpreted as node attributes.
+
+
+## Scrape CGIAR-affiliated Authors
+
+We'll use Google Scholar citations as a starter. GS does not make it easy to
+scrape the entire catalog for specific keywords (cannot page through query
+results using URL parameters), so we need an iterative approach instead. Also
+note that a majority of authors are not "verified" (records only show
+unstructured list of authors in `Lastname, F` format not hyperlinked to their
+profile page or not showing any e-mail domain name). Few author profiles include
+list of co-authors, but only when entered manually. This makes GS difficult to
+scrape altogether.
+
+Using the list of co-authors on author's profile pages would bias the graph
+towards authors with complete profiles and not necessarily a higher number of
+publications or citations.
+
+
+```{r setup} 
+ 
+library(data.table)
+library(rvest)
+library(stringr)
+library(igraph)
+library(networkD3)
+
+setwd("~/Dropbox (IFPRI)/SDA/Projects/2016-Semantics")
+
+# Load data snapshot
+load("./tmp/GoogleScholarCGIAR.RData")
+
+```
+
+
+```{r, eval=F}
+
+# Get GS IDs and attributes of CGIAR authors over 2000-2015 period
+gs.url <- "https://scholar.google.com/citations?view_op=view_org&hl=en&org=5225706230162989193&before_author="
+gs.url.author <- "https://scholar.google.com/citations?hl=en&user="
+gs.url.colleagues <- "https://scholar.google.com/citations?view_op=list_colleagues&hl=en&user="
+gs.root.author <- "WiY9Ku0AAAAJ" # top cited CGIAR author id
+page <- read_html(paste0(gs.url, gs.root.author))
+
+# Helper functions
+scrape.org <- function(id) {
+  page <- read_html(paste0(gs.url, id))
+  cg.author <- page %>% html_nodes(css=".gsc_1usr_name") %>% html_text()
+  cg.id <-  page %>% html_nodes(xpath="//h3[@class='gsc_1usr_name']/a/@href") %>% html_text()
+  cg.id <- str_replace(str_replace(cg.id, fixed("/citations?user="), ""), "&hl=en&oe=ASCII", "")
+  cg.cited <- page %>% html_nodes(css=".gsc_1usr_cby") %>% html_text()
+  cg.cited <- as.integer(str_replace(cg.cited, "Cited by ", ""))
+  cg.title <- page %>% html_nodes(css=".gsc_1usr_aff") %>% html_text()
+  cg.key <- page %>% html_nodes(css=".gsc_1usr_int")
+  cg.key <- lapply(cg.key, html_nodes, css="a")
+  cg.key <- lapply(cg.key, html_text)
+  tmp <- data.table(id=cg.id, fullName=cg.author, cited=cg.cited, title=cg.title, keywords=cg.key)
+  return(tmp)
+}
+
+scrape.author <- function(id) {
+  page <- read_html(paste0(gs.url.author, id))
+  cg.author <- page %>% html_node(css="#gsc_prf_in") %>% html_text()
+  cg.cited <- page %>% html_node(css=".gsc_rsb_std") %>% html_text()
+  cg.cited <- as.integer(cg.cited)
+  cg.title <- page %>% html_node(css=".gsc_prf_il") %>% html_text()
+  cg.key <- page %>% html_nodes(css=".gsc_prf_ila")
+  cg.key <- sapply(cg.key, html_text)  
+  cg.cgiar <- page %>% html_node(css="#gsc_prf_ivh") %>% html_text()
+  cg.cgiar <- str_detect(cg.cgiar, "cgiar.org")
+  tmp <- data.table(id=id, fullName=cg.author, cited=cg.cited, title=cg.title, cgiar=cg.cgiar)
+  tmp[, keywords := paste(tolower(cg.key), collapse="; ")]
+  return(tmp)
+}
+
+scrape.coauthors <- function(id) {
+  page <- read_html(paste0(gs.url.colleagues, id))
+  cg.author <- page %>% html_nodes(css=".gsc_1usr_name") %>% html_text()
+  cg.id <-  page %>% html_nodes(xpath="//h3[@class='gsc_1usr_name']/a/@href") %>% html_text()
+  cg.id <- str_replace(str_replace(cg.id, fixed("/citations?user="), ""), "&hl=en&oe=ASCII", "")
+  if (length(cg.id)>0) tmp <- data.table(id=id, ids=cg.id, coFullName=cg.author)
+  else tmp <- data.table()
+  return(tmp)
+}
+
+```
+
+```{r, eval=F}
+
+# Start scraping from root author down through its CGIAR co-authors
+top.id <- scrape.coauthors(gs.root.author)$ids
+
+# Init
+cg.author <- data.table(id=NA, fullName=NA, cited=NA, title=NA, cgiar=NA, keywords=NA)
+cg.coauthor <- data.table(id=NA, ids=NA)
+
+# Start from root author and continue to scrape through list of co-authors
+for (i in 1:500) {
+  j <- 1
+  while (top.id[j] %in% cg.author$id) {
+    # Move down each list of co-authors
+    if (j < length(top.id))  j <- j+1 else break
+  }
+  if (top.id[j] %in% cg.author$id) {
+    # Don't re-scrape the same author
+    top.id <<- cg.coauthor[!ids %in% cg.author$id, ids]
+    j <- 1
+  }
+  cat(i, ":", top.id[j], "\n")
+  tmp <- scrape.author(top.id[j])
+  tmp1 <- scrape.coauthors(top.id[j])
+  cg.coauthor <- rbind(cg.coauthor, tmp1, fill=T)
+  setkey(cg.coauthor, id, ids)
+  cg.coauthor <- unique(cg.coauthor)  
+  tmp[, coauthors := nrow(tmp1)]
+  cg.author <- rbind(cg.author, tmp, fill=T)
+  setkey(cg.author, id)
+  cg.author <- unique(cg.author)
+  if (nrow(tmp1)>0) {
+    # Rank co-authors
+    tmp2 <- lapply(tmp1$ids, scrape.author)
+    tmp2 <- rbindlist(tmp2)
+    tmp2 <- tmp2[order(-cited)]
+    # Scrape CGIAR-affiliated co-authors first
+    if (length(top.id)>0) top.id <<- tmp2[cgiar==T, id]
+    #if (length(top.id)==0) top.id <<- tmp2$id
+  }
+}
+
+# Remove duplicate authors
+setkey(cg.author, id)
+cg.author <- unique(cg.author)
+cg.author <- cg.author[!is.na(id)]
+
+# Clean up list of keywords
+cg.keywords <- paste(cg.author$keywords, collapse="; ")
+cg.keywords <- unlist(str_split(cg.keywords, "; "))
+cg.keywords <- unique(cg.keywords)
+cg.keywords <- cg.keywords[!cg.keywords %in% c("", " ", NA)]
+
+# Show first 10 extracted authors
+head(cg.author, 10)
+
+```
+
+Using 500 page scrapes the steps above extracted `r nrow(cg.coauthor)`
+co-author relationships, out of which we identifed `r nrow(cg.author)` unique
+authors.
+
+## Graph CGIAR co-Authorships
+
+First let's graph the relationships between authors and co-authors, trying to
+identify CGIAR-affiliated and non-CGIAR authors.
+
+```{r, eval=F}
+
+## Prepare data for igraph
+nodes <- cg.author
+nodes[, ID := 0:(.N-1)]
+nodes[, size := scale(cited, center=F)*4]
+nodes[, group := factor(cgiar, labels=c("Partners", "CGIAR"))]
+links <- cg.coauthor[id %in% nodes$id]
+links <- links[ids %in% nodes$id]
+setkey(links, id)
+links$from <- nodes[links][, ID]
+setkey(links, ids)
+links$to <- nodes[links][, ID]
+links[, value := 3]
+setcolorder(nodes, c(8:10, 1:7))
+setcolorder(links, c(4,5,6,1:3))
+
+```
+
+```{r}
+
+# Network plots
+net <- graph.data.frame(links, nodes, directed=F)
+plot(net, 
+  edge.arrow.size=.2, 
+  edge.color="orange",
+  vertex.color=ifelse(V(net)$cgiar, "green", "orange"), 
+  vertex.label.color="black",
+  vertex.frame.color="white",
+  vertex.size=log10(V(net)$cited),
+  vertex.label=V(net)$fullName,
+  vertex.label.cex=.5)
+
+```
+
+Same as above with D3 interactive network graph. We'd like to color-code CGIAR
+center affiliations but this requires cleaning up organization records.
+
+```{r}
+
+# Add node attributes (incl. cluster membership via random walk)
+tmp <- membership(cluster_walktrap(net))
+nodes[, label := paste(fullName, title, keywords, sep=" - ")]
+setkey(nodes, ID)
+nodes[J(as.integer(names(tmp))), cluster := as.vector(tmp)]
+
+# Color-code affiliation
+forceNetwork(links, nodes,
+  Source="from", Target="to",
+  NodeID="label", Nodesize="size",
+  linkColour="#666", 
+  fontSize=12, fontFamily="arial",
+  Group="group", 
+  colourScale=JS("d3.scale.category10()"),
+  zoom=T, legend=T)
+
+# Color-code cluster
+forceNetwork(links, nodes,
+  Source="from", Target="to",
+  NodeID="label", Nodesize="size",
+  linkColour="#666", 
+  fontSize=12, fontFamily="arial",
+  Group="cluster", 
+  colourScale=JS("d3.scale.category20()"),
+  zoom=T, legend=T)
+
+```
+
+**TODO** We would also need to consolidate the list of organizations, identify
+country of affiliation, consolidate keywords using the latest CGIAR
+ontologies, then identify topical clusters of authors. Also need to look through
+other repositories (e.g. [Web of
+Science](http://ipscience.thomsonreuters.com/product/web-of-science/)).
+
+
+```{r rpubs, eval=F}
+
+# Save snapshot
+rm(list=ls()[ls() %like% "tmp"])
+save.image("./tmp/GoogleScholarCGIAR.RData")
+
+```
+
+```{r rpubs, eval=F, echo=F}
+
+# Knit and upload to RPubs
+require(rsconnect)
+require(knitr)
+
+knit("./R/GoogleScholarCGIAR.Rmd", "./R/GoogleScholarCGIAR.html")
+res <- rpubsUpload("CGIAR-Authors", "./R/GoogleScholarCGIAR.html", "./R/GoogleScholarCGIAR.Rmd")
+if (!is.null(res$continueUrl)) browseURL(res$continueUrl) else stop(res$error)
+rpubsUpload("CGIAR-Authors", "./R/GoogleScholarCGIAR.html", "./R/GoogleScholarCGIAR.Rmd", id=res$id)
+
+```
+
+

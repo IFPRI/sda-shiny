@@ -4,7 +4,7 @@
 # Project: HarvestChoice for A4NH
 # Authors: Bacou, Melanie <mel@mbacou.com>
 #####################################################################################
-library(rCharts)
+
 
 shinyUI(fluidPage(
   title="DHS - Subnational Nutrition and Health Statistics",
@@ -18,9 +18,9 @@ shinyUI(fluidPage(
         img(src="global_logo.png", alt="Home"))))
   ),
 
-  #   fluidRow(style="position: relative;",
-  #     leafletOutput("map", width="100%", height=380)
-  #   ),
+  fluidRow(style="position: relative;",
+    leafletOutput("map", width="100%", height=380)
+  ),
 
   fluidRow(
 
@@ -62,7 +62,7 @@ shinyUI(fluidPage(
             mainPanel(width=9,
               h3(uiOutput("txtTitle")),
               bsAlert("alertNoData"),
-              plotOutput("mapplot", height="auto", clickId="mplot"))
+              plotOutput("mapplot", height="auto", click="mplot"))
           )
         ),
 

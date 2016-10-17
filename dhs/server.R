@@ -5,8 +5,6 @@
 # Authors: Bacou, Melanie <mel@mbacou.com>
 #####################################################################################
 
-load("../dhs/data/dhsMap.2014.10.16.RData")
-
 # Helper - Archive spatial formats for download
 writeZip <- function(x, file, filename, format, ...) {
   if (format=="ESRI Shapefile") {
@@ -49,13 +47,13 @@ genMap <- function(iso, res, var, col, brks) {
 shinyServer(function(input, output, session) {
 
   # Init map
-  #   map <- leaflet() %>%
-  #     addTiles("http://{s}.tiles.mapbox.com/v3/jcheng.map-5ebohr46/{z}/{x}/{y}.png",
-  #       attribution=HTML('Maps by <a href="http://www.mapbox.com/">Mapbox</a>')) %>%
-  #     setView(8, 8, 6)
+  map <- leaflet() %>%
+    addTiles("http://{s}.tiles.mapbox.com/v3/jcheng.map-5ebohr46/{z}/{x}/{y}.png",
+      attribution=HTML('Maps by <a href="http://www.mapbox.com/">Mapbox</a>')) %>%
+    setView(8, 8, 6)
 
   # Render map
-  #  output$map <- renderLeaflet(map)
+  output$map <- renderLeaflet(map)
 
   # List of indicators
   output$selectVar <- renderUI({
@@ -152,15 +150,15 @@ shinyServer(function(input, output, session) {
         values$g <- g
         values$s_g <- s_g
 
-        #           coords <- apply(sp::coordinates(s_g), 2, mean, na.rm=T)
-        #           m <- map %>%
-        #             setView(coords[1]+3, coords[2], 6) %>%
-        #             addPolygons(data=s_g, layerId=row.names(s_g), fillColor=s_g@data$cl,
-        #               weight=.6, color="white", fillOpacity=0.7,
-        #               popup=paste0(
-        #                 "<small>Region</small><strong><br/>", s_g@data$regName, "</strong><br/>",
-        #                 "<small>Value</small><strong><br/>", round(s_g@data$var, 2), "</strong>"))
-        #           output$map <- renderLeaflet(m)
+        coords <- apply(sp::coordinates(s_g), 2, mean, na.rm=T)
+
+        leafletProxy("map", session) %>%
+          setView(coords[1]+3, coords[2], 6) %>%
+          addPolygons(data=s_g, layerId=row.names(s_g), fillColor=s_g@data$cl,
+            weight=.6, color="white", fillOpacity=0.7,
+            popup=paste0(
+              "<small>Region</small><strong><br/>", s_g@data$regName, "</strong><br/>",
+              "<small>Value</small><strong><br/>", round(s_g@data$var, 2), "</strong>"))
 
       }
     }

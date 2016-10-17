@@ -1,0 +1,556 @@
+---
+title:  "Scrape CGIAR Publications from ScienceDirect, 1980-2016"
+author: "IFPRI/CIAT"
+date:   "October 2016. Last updated on `r Sys.Date()`. DRAFT, do not use or cite."
+output:
+  html_document:
+    fig_height: 8
+    fig_width: 8
+    toc: true
+    toc_float: true    
+    fig_caption: true  
+---
+
+Extract basic metadata records from CGIAR centers from ScienceDirect
+on-line catalog. Identify centers, authors and co-author affiliations
+when feasible. Explore trends in authorships especially changes between pre- and
+post-CGIAR Reform (around 2010).
+
+We queried ScienceDirect journals and books for author affiliations matching
+CGIAR centers (incl. retired centers, ILRAD, ISNAR, ILCA, and INIBAP). Note that
+we could also hit **ScienceDirect API** at
+http://api.elsevier.com/documentation/SCIDIRSearchAPI.wadl#N1002B or
+**Scopus API** at https://dev.elsevier.com/ but these APIs don't seem to return
+author ids (only primary author and unstructured list of co-authors).
+
+Note that R package `RefManageR` may also be used to query CrossRef API,
+GoogleScholar, and Zotero -- could be useful as well. Package `rscopus` provides
+a few helper methods to interact with Elsevier Scopus APIs.
+
+
+```{r}
+
+library(data.table)
+library(RefManageR)
+library(rvest)
+library(stringr)
+library(ggplot2)
+library(pander)
+library(rscopus)
+
+setwd("~/Projects/hc-shiny/cgiarPubs")
+
+# Load data snapshot
+load("./tmp/ScienceDirect.RData")
+
+```
+
+# Scrape CGIAR publications from ScienceDirect
+
+```{r, eval=F}
+
+# Load Bibtex records downloaded from ScienceDirect, one file per center
+f <- list.files("./in/ScienceDirect", "*.bib", full.names=T)
+bib <- lapply(f, ReadBib, check=F)
+names(bib) <- str_replace(str_replace(basename(f), "science_", ""), ".bib", "")
+
+```
+
+```{r, warning=F}
+
+# Show first 2 records
+pander(bib[[1]][1:2])
+
+```
+
+Note that author e-mail and affiliation are typically missing.
+
+```{r, eval=F}
+
+# Add `institution` field from file name
+cg <- c("Africa Rice", 
+  "Bioversity International", "Bioversity International", 
+  "CIAT", "CIFOR", "CIMMYT", "CIP", "ICARDA",        
+  "ICRAF", "ICRISAT", "IFPRI", "IFPRI",     
+  "IITA", "ILRI", "ILRI", "IRRI", "IWMI", "WorldFish")
+
+# Flatten all records
+refs <- lapply(bib, as.data.frame)
+refs <- lapply(refs, data.table)
+for (i in 1:length(cg)) refs[[i]][, institution := cg[i]]
+refs <- rbindlist(refs, fill=T)
+
+# Remove duplicates
+setkey(refs, url)
+refs <- unique(refs)
+
+# Make arbitrary unique publication IDs
+refs[, 
+  uid := tolower(paste(abbreviate(institution, minlength=3), str_pad(.I, 4, pad="0"), sep="-")),
+  by=institution]
+
+```
+
+```{r}
+
+# Print records
+pander(refs[[1]][1:10])
+
+# Tally by CGIAR center
+ggplot(refs[, .N, keyby=institution], 
+  aes(institution, N)) +
+  geom_bar(stat="identity", color="#ffffff", alpha=0.6) +
+  labs(x="", y="", title="CGIAR Publications by center (Elsevier)") +
+  coord_flip()
+
+# Tally by publication year
+ggplot(refs[, .N, keyby=.(year=as.Date(year, "%Y"), Center=institution)],
+  aes(year, N, fill=Center)) +
+  geom_bar(stat="identity", alpha=0.6) +
+  labs(x="", y="", title="CGIAR Publications by year (Elsevier)")
+
+# Tally by journal (note these are Elsevier journals only)
+pander(refs[!is.na(journal), .N, keyby=journal])
+
+```
+
+In total `r nrow(refs)` CGIAR-affiliated publications (incl. journal
+articles and manuscripts) are extracted from ScienceDirect.
+`r refs[!is.na(doi)]` have a unique DOI number, that may be used to query web
+services for additional details, incl. full-text articles.
+
+We further need to structure the list of authors, co-authors and their
+affiliation, as this information is not available from the Bibtex dumps. We use
+`rvest` to further scrape this information from ScienceDirect.
+
+# Scrape CGIAR authors and publications from Scopus APIs
+
+Instead of importing records from ScienceDirect Bibtex dumps we could also try
+to use John Muschelli's R package `rscopus` to query Elsevier Scopus APIs
+documented at https://cran.r-project.org/web/packages/rscopus/rscopus.pdf.
+
+```{r}
+
+# Set API key
+options(elsevier_api_key=api_key)
+
+# Scopus can be searched against a publication DOI or PII.
+# Make PII explicit
+refs[, pii := str_replace(url, "http://www.sciencedirect.com/science/article/pii/", "")]
+
+# Use PII query
+tmp <- generic_elsevier_api(query="pii(0001706X89900223)", 
+  type="search", search_type="scopus", api_key=get_api_key())
+
+# Print response
+pander(tmp$content$`search-results`$entry[[1]])
+
+# Use affiliation query
+q <- "affil(ifpri)"
+tmp <- generic_elsevier_api(query=q, 
+  type="search", search_type="affiliation", api_key=get_api_key())
+# => not authenticated (not sure that endpoint is working)
+tmp <- generic_elsevier_api(query=q, 
+  type="search", search_type="scopus", api_key=get_api_key())
+
+# Print first record
+pander(tmp$content$`search-results`$entry[[1]])
+
+tmp <- generic_elsevier_api(query="authlast(Rosegrant)", 
+  type="author", api_key=get_api_key())
+# This author endpoint does not seem to work either: "RESOURCE_NOT_FOUND"
+
+```
+
+Querying against Scopus API works but doesn't return any author UID or OrcID
+only full names, and only return the first author affiliation, city and country.
+The response does include article citation in field `citedby-count` though,
+which may be useful. Also note that Elsevier Author API at endpoint
+https://api.elsevier.com/content/search/author does not seem to work right now.
+
+```{r, eval=F}
+
+# Helper - Return article citations, and 1st affiliation city and country from Scopus API
+scrapePII <- function(x) {
+  q <- paste0("pii(", x, ")")
+  tmp <- generic_elsevier_api(query=q, type="search", search_type="scopus", api_key=get_api_key())
+  tmp <- data.table(
+    pii=x,
+    cited=ifelse(is.null(
+        tmp$content$`search-results`$entry[[1]]$`citedby-count`),
+      as.integer(NA), as.integer(tmp$content$`search-results`$entry[[1]]$`citedby-count`)),
+    affname=ifelse(is.null(
+        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affilname`),
+      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affilname`),
+    affcountry=ifelse(is.null(
+        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-country`),
+      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-country`),
+    affcity=ifelse(is.null(
+        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-city`),
+      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-city`))
+  return(tmp)
+}
+
+tmp <- scrapePII(refs[1, pii])
+for (i in 2:nrow(refs)) tmp <- rbind(tmp, scrapePII(refs[i, pii]))
+refs <- cbind(refs, tmp)
+
+```
+
+```{r}
+
+# Summary
+pander(summary(refs$cited))
+
+# Show top cited articles
+pander(refs[sort(-cited)][1:10, .(title, author, year)])
+
+# Tally citations by center
+ggplot(refs[, .(cited=sum(cited, na.rm=T)), keyby=.(Center=institution)],
+  aes(Center, cited, fill=Center)) +
+  geom_bar(stat="identity", alpha=0.6) +
+  labs(x="", y="", title="Citations by center (Elsevier)") +
+  coord_flip() + theme(legend.position="none")
+
+```
+
+Instead of using the Scopus API, let's scrape ScienceDirect web pages for
+complete author affiliations.
+
+
+```{r, eval=F}
+
+# Helper - Scrape author affiliation from ScienceDirect by PII
+scrapeAuthor <- function(x, y) {
+  
+  if (is.na(x)) return(data.table(
+        uid=NA, 
+        name=NA, 
+        url=NA, 
+        email=NA,
+        affid=NA,
+        aff=NA, 
+        rank=as.integer(NA)))
+  
+  # There seems to be multiple possible layouts for authors
+  p <- read_html(x)
+  aut <- p %>% html_nodes(css=".authorGroup li")
+  
+  if (length(aut) > 0) {
+    # Layout #1
+    aut <- lapply(aut, function(x) data.table(
+          uid=y,
+          name=x %>% html_node(css="a.authorName") %>% html_text(),
+          url=x %>% html_node(css="a.authorName") %>% html_attr("id"),
+          email=x %>% html_node(css=".auth_mail") %>% html_attr("href"),
+          affid=x %>% html_node(css="a.auth_aff") %>% html_attr("href")))
+    
+    aff <- p %>% html_nodes(css=".affiliation li")
+    aff <- lapply(aff, function(x) data.table(
+          affid=x %>% html_attr("id"),
+          aff=x %>% html_node(css="span") %>% html_text()))  
+    
+  } else {
+    # Layout #2
+    aut <- p %>% html_nodes(css="span.author")
+    aut <- lapply(aut, function(x) data.table(
+          uid=y,
+          name=x %>% html_node(css=".author-name") %>% html_text(),
+          url=x %>% html_node(css=".author-name-link") %>% html_attr("id") ,
+          email=x %>% html_node(css=".auth_mail") %>% html_attr("href"),
+          affid=x %>% html_node(css=".author-affiliation") %>% html_attr("href")))
+    
+    aff <- p %>% html_nodes(css=".affiliation")
+    aff <- lapply(aff , function(x) data.table(
+          affid=x %>% html_attr("id"),
+          aff=x %>% html_node(css=".affiliation__text") %>% html_text()))
+  }
+  
+  aut <- rbindlist(aut)
+  aff <- rbindlist(aff)
+  aut[, affid := str_replace(affid, "#", "")]  
+  
+  # It can happen that affid is NA, then assign same affiliation to all authors
+  aff[is.na(affid), affid := "0"]
+  aut[is.na(affid), affid := "0"]
+  
+  setkey(aut, affid)
+  setkey(aff, affid)
+  aut[aff, aff := aff]
+  
+  # Corner case: treat weirdish affiliations starting with "mc" id
+  if (aff[1, affid] %like% "mc" | unique(aut$affid)=="0") aut$aff <- aff$aff
+  
+  # Clean up
+  aut[, name := str_replace(name, "            Opens overlay\n            \n", "")]
+  aut[, name := str_replace(name, "\n", "")]
+  aut[, email := str_replace(email, "mailto:", "")]
+  aut[, rank := .I]
+  return(aut)
+}
+
+```
+
+```{r, eval=F}
+
+# Build a complete list of authors and affiliations
+authors <- scrapeAuthor(refs[1, url], refs[1, uid])
+bad <- integer(0)
+
+for (i in 2:nrow(refs)) {
+  cat(i, "\n")
+  tmp <- try(scrapeAuthor(refs[i, url], refs[i, uid]))
+  if( class(tmp)=="try-error") {
+    # Beep and mark bad records
+    alarm() 
+    bad <- c(bad, i)
+  } else authors <- rbind(authors, tmp)
+}
+
+# Try the bad ones again
+bad2 <- integer(0)
+for (i in bad) {
+  cat(i, "\n")
+  tmp <- try(scrapeAuthor(refs[i, url], refs[i, uid]))
+  if( class(tmp)=="try-error") {
+    alarm() 
+    bad2 <- c(bad2, i)
+  } else authors <- rbind(authors, tmp)
+}
+
+# Save and mark records that could not be scraped
+bad <- bad2; rm(bad2)
+refs[, hasAuthor := T]
+refs[bad, hasAuthor := F]
+
+# We seem to be missing names of authors for 10 publications
+bad_name <- authors[is.na(name), unique(uid)]
+
+# Let's try to scrape these pages again
+authors <- authors[!uid %in% bad_name]
+bad2 <- integer(0)
+for (i in bad_name) {
+  cat(i, "\n")
+  tmp <- try(scrapeAuthor(refs[uid==i, url], i))
+  if( class(tmp)=="try-error") {
+    alarm() 
+    bad2 <- c(bad2, i)
+  } else authors <- rbind(authors, tmp)
+}
+
+# => ignore the 4 pubs that cannot be scraped for author names
+authors <- authors[!is.na(name)]
+refs[uid %in% bad_name, hasAuthor := F]
+
+# Consolidate the list of authors, make unique author identifiers.
+# Note that some authors have an `orcid` of the form `authname_N8eaef220N8ea76980`
+# but that's not in a typical ORCID format (should be 16-digit), must be Scopus author ID or
+# hash tag; not sure it's usable at all.
+
+# Make arbitrary unique author id for now
+authors[url %like% "author-", url := NA]
+authors[, name := str_trim(name)]
+authors[, email := str_trim(email)]
+authors[, aff := str_trim(aff)]
+authors[, authid := paste0("aut-", str_pad(.GRP, 5, pad="0")), keyby=name]
+
+# Remove duplicated author by publication uid
+setkey(authors, uid, authid)
+authors <- unique(authors)
+
+# Some affiliations are clearly bad
+authors[aff %like% "Chapter", aff := NA]
+
+setcolorder(authors, c(8,1,2:7))
+setcolorder(refs, c(23, 25, 1:22, 27:29, 26, 24))
+
+```
+
+```{r}
+
+# Print authors with same name but different affiliation
+tmp <- authors[, .(name=unique(name)), keyby=.(authid, aff)]
+tmp[, N:=.N, by=name]
+pander(tmp[N>1][order(name)][1:21])
+
+```
+
+The steps above return:
+
+* `r nrow(authors)` authors/co-authors across all
+CGIAR publications.
+* At first glance there are `r authors[, uniqueN(authid)]` unique researchers (authors with unique names and ScopusID), but this might need further cleaning. 
+* `r authors[!is.na(url), .N]` researchers have an
+ORCID/ScopusID, and `r authors[!is.na(email), .N]` authors show an e-mail
+address. Note that author ScopusID, when present,
+could be used to augment information about known authors (e.g. impact factor,
+location, etc.).
+* Out of the `r authors[, uniqueN(authid)]` unique researchers, we have affiliation information for `r authors[!is.na(aff), uniqueN(authid)]`.
+* Out of the `r nrow(refs)` CGIAR publication records from
+ScienceDirect author details could not be extracted for `r length(bad)+length(bad_name)` entries (server error or ill-formatted pages). 
+
+# Improve author affiliation
+
+Before looking at trends in co-authorships we need to identify
+authors affiliated with CGIAR centers. In principle each publication should have
+at least 1 affiliated author. We could also try to disambiguate affiliation names, and then geolocate them.
+
+
+```{r, eval=F}
+
+# Try to identify CGIAR-affiliated authors
+for (i in unique(cg)) authors[aff %like% i, institution := i]
+
+# And a few more manual recodes
+authors[aff %like% "Bioversity", institution := "Bioversity International"]
+authors[aff %like% "INIBAP", institution := "Bioversity International"]
+authors[aff %like% "ILRAD", institution := "ILRI"]
+authors[aff %like% "ILCA", institution := "ILRI"]
+authors[aff %like% "International Livestock Research Institute", institution := "ILRI"]
+authors[aff %like% "World Agroforestry", institution := "ICRAF"]
+authors[aff %like% "International Potato Center", institution := "CIP"]
+authors[aff %like% "International Rice Research Institute", institution := "IRRI"]
+authors[aff %like% "ISNAR", institution := "IFPRI"]
+authors[aff %like% "International Food Policy Research Institute", institution := "IFPRI"]
+authors[aff %like% "International Maize and Wheat", institution := "CIMMYT"]
+authors[aff %like% "International Institute for Tropical Agriculture", institution := "IITA"]
+authors[aff %like% "International Institute of Tropical Agriculture", institution := "IITA"]
+authors[aff %like% "Centro Internacional de Agricultura Tropical", institution := "CIAT"]
+authors[aff %like% "International Center for Tropical Agriculture", institution := "CIAT"]
+authors[tolower(aff) %like% "centre for agricultural research in the dry areas", institution := "ICARDA"]
+authors[tolower(aff) %like% "institute for the semi-arid tropics", institution := "ICRISAT"]
+authors[tolower(aff) %like% "international forestry research", institution := "CIFOR"]
+authors[tolower(aff) %like% "international water management institute", institution := "IWMI"]
+
+# Are there publications where no author is marked as CGIAR?
+tmp <- authors[, .(N=sum(!is.na(institution), na.rm=T)), by=uid][N==0]
+# => still 1073 entries
+tmp <- authors[uid %in% tmp$uid, .(authid, name, aff), keyby=uid]
+# => they seem to correspond to manuscripts with large list of authors, not clear why they 
+# appear in ScienDirect query results.
+
+# Indicate which publications have known CGIAR-affiliated authors
+tmp <- authors[, .(N=sum(!is.na(institution), na.rm=T)), by=uid]
+setkey(refs, uid)
+setkey(tmp, uid)
+refs[tmp, nCGIARAuthor := N]
+
+# Export metadata
+refs.lbl <- c(
+  "unique publication ID (arbitrary)",
+  "unique publication ID (ScienceDirect)",
+  "publication type",
+  "title",
+  "journal",
+  "volume",
+  "number",
+  "pages",
+  "publication year",
+  "ISSN",
+  "DOI",
+  "ScienceDirect URL",
+  "concat list of authors",
+  "keywords",
+  "abstract",
+  "editor",
+  "book title",
+  "publisher",
+  "series",
+  "edition",
+  "publisher city or country",
+  "ISBN",
+  "notes",
+  "CGIAR center affiliation",
+  "affiliation of 1st author",
+  "affiliation country of 1st author",
+  "affiliation city of 1st author",
+  "number of citations",
+  "has matching authors (TRUE/FALSE)",
+  "count of matching CGIAR-affiliated authors")
+
+authors.lbl <- c(
+  "unique author ID (arbitrary)",
+  "unique publication ID (matching list of publications)",
+  "full name",
+  "ScienceDirect URL",
+  "e-mail",
+  "affiliation ID on web page (ignore)",
+  "affiliation",
+  "author rank in publication",
+  "CGIAR center affiliation")
+
+refs.lbl <- data.table(varCode=names(refs), varLabel=refs.lbl)
+authors.lbl <- data.table(varCode=names(authors), varLabel=authors.lbl)
+
+# Export to CSV
+write.csv(refs, "./out/2016.10/sciencedirect_pubs.csv", na="", row.names=F)
+write.csv(authors, "./out/2016.10/sciencedirect_authors.csv", na="", row.names=F)
+write.csv(refs.lbl, "./out/2016.10/sciencedirect_pubs_meta.csv", na="", row.names=F)
+write.csv(authors.lbl, "./out/2016.10/sciencedirect_authors_meta.csv", na="", row.names=F)
+
+```
+
+
+```{r}
+
+# Tally identified CGIAR authors by publication
+pander(table(refs$nCGIARAuthor))
+
+
+# Tally the number of pairwise authorships to draw network graph
+
+
+# Add count of CGIAR-affiliated publications to each author
+
+# Add list of unique keywords to each author
+
+# Tally unique authors by CGIAR-affiliation
+
+
+```
+
+# Graph authorships
+
+
+```{r, eval=F}
+
+# Prepare author data for graphing
+nodes <- authors
+nodes[, ID := 0:(.N-1)]
+nodes[, size := scale(cited, center=F)*4]
+nodes[, group := factor(cgiar, labels=c("Partners", "CGIAR"))]
+links <- cg.coauthor[id %in% nodes$id]
+links <- links[ids %in% nodes$id]
+setkey(links, id)
+links$from <- nodes[links][, ID]
+setkey(links, ids)
+links$to <- nodes[links][, ID]
+links[, value := 3]
+setcolorder(nodes, c(8:10, 1:7))
+setcolorder(links, c(4,5,6,1:3))
+
+# Prepare CGIAR center data for graphing
+
+
+```
+
+
+# Next steps
+
+* Find author impact factors and geographic location using ORCID or ScopusID?
+* Possible semantic analysis on article titles, abstracts, and keywords
+  using **MonkeyLearn API** (see https://github.com/ropenscilabs/monkeylearn
+  and http://monkeylearn.com/) to identify key concepts and terms (and help
+  build ANT).
+* Identify place names from titles, abstracts, and keywords (CIAT)
+
+
+```{r save, eval=F}
+
+# Save snapshot
+rm(list=ls()[ls() %like% "tmp"])
+rm(x, y, i, j, aff, aut, q)
+save.image("./tmp/ScienceDirect.RData")
+
+```
+

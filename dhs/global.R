@@ -8,17 +8,10 @@
 library(shiny)
 library(shinyBS)
 library(data.table)
-library(reshape2)
-library(sp)
-library(leaflet, lib.loc="/usr/lib64/R/library")
+library(leaflet)
 library(RColorBrewer)
+library(rCharts)
 
-if (.Platform$OS.type=="windows") {
-  setwd("~/Projects/hc-shiny/tmp")
-} else {
-  setwd("/home/projects/shiny/tmp")
-}
-
-load("../dhs/data/dhsMap.2014.10.16.RData")
+load("./data/dhsMap.2014.10.16.RData")
 
 

@@ -123,7 +123,6 @@ save.image("./data/dhsMap.2014.10.16.RData")
 # 2015.01.31 Update: Improved DHS boundaries
 #####################################################################################
 
-rm(list=ls())
 setwd("/home/projects/shiny")
 load("./data/dhsMap.2014.10.16.RData")
 
@@ -132,6 +131,27 @@ gis.web <- readOGR("./data", "MEASURE_DHS_Regions_2014")
 proj4string(gis.web) <- CRS("+init=epsg:4326")
 # [1] "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
+
+#####################################################################################
+# 2016.10.12 Add gender disaggregated vars and corrections from JG
+#####################################################################################
+
+library(data.table)
+library(tmap)
+
+setwd("/home/projects/hc-shiny/dhs")
+load("./data/dhsMap.RData")
+
+# Note that this version is using JG's update from August 2015.
+
+# Make interactive map
+tmp <- g2[, c(1:13, 332:358)]
+tmp@data[, 14:40] <- tmp@data[, 14:40]*100
+
+tmap_mode("view")
+tm_shape(tmp, is.master=T) +
+  tm_polygons("ic_stunted_moderate_m", n=9, palette="-Spectral",
+  title="Moderate Stunting <br/>in Male Children")
 
 
 
