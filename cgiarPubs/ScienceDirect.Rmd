@@ -4,11 +4,13 @@ author: "IFPRI/CIAT"
 date:   "October 2016. Last updated on `r Sys.Date()`. DRAFT, do not use or cite."
 output:
   html_document:
-    fig_height: 8
-    fig_width: 8
+    fig_height: 5
     toc: true
     toc_float: true    
-    fig_caption: true  
+    fig_caption: true 
+    error: false
+    warning: false
+    message: false
 ---
 
 Extract basic metadata records from CGIAR centers from ScienceDirect
@@ -28,7 +30,7 @@ GoogleScholar, and Zotero -- could be useful as well. Package `rscopus` provides
 a few helper methods to interact with Elsevier Scopus APIs.
 
 
-```{r}
+```{r setup}
 
 library(data.table)
 library(RefManageR)
@@ -56,16 +58,16 @@ names(bib) <- str_replace(str_replace(basename(f), "science_", ""), ".bib", "")
 
 ```
 
-```{r, warning=F}
+```{r, warning=FALSE}
 
 # Show first 2 records
-pander(bib[[1]][1:2])
+bib[[1]][1:2]
 
 ```
 
 Note that author e-mail and affiliation are typically missing.
 
-```{r, eval=F}
+```{r, eval=F, results='hide'}
 
 # Add `institution` field from file name
 cg <- c("Africa Rice", 
@@ -100,36 +102,34 @@ pander(refs[[1]][1:10])
 ggplot(refs[, .N, keyby=institution], 
   aes(institution, N)) +
   geom_bar(stat="identity", color="#ffffff", alpha=0.6) +
-  labs(x="", y="", title="CGIAR Publications by center (Elsevier)") +
+  labs(x="", y="", title="CGIAR Publications by center (Elsevier, 1980-2016)") +
   coord_flip()
 
 # Tally by publication year
 ggplot(refs[, .N, keyby=.(year=as.Date(year, "%Y"), Center=institution)],
   aes(year, N, fill=Center)) +
   geom_bar(stat="identity", alpha=0.6) +
-  labs(x="", y="", title="CGIAR Publications by year (Elsevier)")
+  labs(x="", y="", title="CGIAR Publications over time (Elsevier, 1980-2016)")
 
 # Tally by journal (note these are Elsevier journals only)
-pander(refs[!is.na(journal), .N, keyby=journal])
+pander(refs[!is.na(journal), .N, keyby=journal][order(-N)][1:8])
+pander(refs[!is.na(journal), .N, keyby=journal][order(N)][1:8])
 
 ```
 
-In total `r nrow(refs)` CGIAR-affiliated publications (incl. journal
-articles and manuscripts) are extracted from ScienceDirect.
-`r refs[!is.na(doi)]` have a unique DOI number, that may be used to query web
-services for additional details, incl. full-text articles.
+In total **`r nrow(refs)`** CGIAR-affiliated publications (incl. journal articles and manuscripts) are extracted from **`r refs[, uniqueN(journal)]`** Elsevier journals from ScienceDirect. **`r refs[!is.na(doi), .N]`** have a unique DOI number, that may be used to query web services for additional details, incl. full-text articles.
 
 We further need to structure the list of authors, co-authors and their
 affiliation, as this information is not available from the Bibtex dumps. We use
 `rvest` to further scrape this information from ScienceDirect.
 
-# Scrape CGIAR authors and publications from Scopus APIs
+# Scrape CGIAR publication citations from Scopus APIs
 
 Instead of importing records from ScienceDirect Bibtex dumps we could also try
 to use John Muschelli's R package `rscopus` to query Elsevier Scopus APIs
 documented at https://cran.r-project.org/web/packages/rscopus/rscopus.pdf.
 
-```{r}
+```{r, message=F, results='hide'}
 
 # Set API key
 options(elsevier_api_key=api_key)
@@ -142,8 +142,16 @@ refs[, pii := str_replace(url, "http://www.sciencedirect.com/science/article/pii
 tmp <- generic_elsevier_api(query="pii(0001706X89900223)", 
   type="search", search_type="scopus", api_key=get_api_key())
 
+```
+
+```{r}
+
 # Print response
 pander(tmp$content$`search-results`$entry[[1]])
+
+```
+
+```{r}
 
 # Use affiliation query
 q <- "affil(ifpri)"
@@ -203,16 +211,18 @@ refs <- cbind(refs, tmp)
 pander(summary(refs$cited))
 
 # Show top cited articles
-pander(refs[sort(-cited)][1:10, .(title, author, year)])
+pander(refs[order(-cited)][1:10, .(title, author, year, cited)])
 
 # Tally citations by center
 ggplot(refs[, .(cited=sum(cited, na.rm=T)), keyby=.(Center=institution)],
   aes(Center, cited, fill=Center)) +
   geom_bar(stat="identity", alpha=0.6) +
-  labs(x="", y="", title="Citations by center (Elsevier)") +
+  labs(x="", y="", title="Citations by center (Elsevier 1980-2016)") +
   coord_flip() + theme(legend.position="none")
 
 ```
+
+# Scrape author affiliation from ScienceDirect
 
 Instead of using the Scopus API, let's scrape ScienceDirect web pages for
 complete author affiliations.
@@ -291,7 +301,7 @@ scrapeAuthor <- function(x, y) {
 
 ```
 
-```{r, eval=F}
+```{r, eval=F, results='hide'}
 
 # Build a complete list of authors and affiliations
 authors <- scrapeAuthor(refs[1, url], refs[1, uid])
@@ -366,28 +376,33 @@ setcolorder(refs, c(23, 25, 1:22, 27:29, 26, 24))
 
 ```
 
-```{r}
+```{r, results='hide'}
 
 # Print authors with same name but different affiliation
 tmp <- authors[, .(name=unique(name)), keyby=.(authid, aff)]
 tmp[, N:=.N, by=name]
-pander(tmp[N>1][order(name)][1:21])
+
+```
+
+```{r}
+
+pander(tmp[N>1][order(name)][1:20])
 
 ```
 
 The steps above return:
 
-* `r nrow(authors)` authors/co-authors across all
+* **`r nrow(authors)`** authors/co-authors across all
 CGIAR publications.
-* At first glance there are `r authors[, uniqueN(authid)]` unique researchers (authors with unique names and ScopusID), but this might need further cleaning. 
-* `r authors[!is.na(url), .N]` researchers have an
-ORCID/ScopusID, and `r authors[!is.na(email), .N]` authors show an e-mail
+* At first glance there are **`r authors[, uniqueN(authid)]`** unique researchers (authors with unique names and ScopusID), but this might need further cleaning. 
+* **`r authors[!is.na(url), .N]`** researchers have an
+ORCID/ScopusID, and **`r authors[!is.na(email), .N]`** authors show an e-mail
 address. Note that author ScopusID, when present,
 could be used to augment information about known authors (e.g. impact factor,
 location, etc.).
-* Out of the `r authors[, uniqueN(authid)]` unique researchers, we have affiliation information for `r authors[!is.na(aff), uniqueN(authid)]`.
-* Out of the `r nrow(refs)` CGIAR publication records from
-ScienceDirect author details could not be extracted for `r length(bad)+length(bad_name)` entries (server error or ill-formatted pages). 
+* Out of the **`r authors[, uniqueN(authid)]`** unique researchers, we have affiliation information for **`r authors[!is.na(aff), uniqueN(authid)]`**.
+* Finally, out of the **`r nrow(refs)`** CGIAR publication records from
+ScienceDirect author details could not be extracted for **`r length(bad)+length(bad_name)`** entries (server error or ill-formatted pages). 
 
 # Improve author affiliation
 
@@ -396,7 +411,7 @@ authors affiliated with CGIAR centers. In principle each publication should have
 at least 1 affiliated author. We could also try to disambiguate affiliation names, and then geolocate them.
 
 
-```{r, eval=F}
+```{r, eval=F, results='hide'}
 
 # Try to identify CGIAR-affiliated authors
 for (i in unique(cg)) authors[aff %like% i, institution := i]

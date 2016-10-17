@@ -1,11 +1,10 @@
 ---
 title:  "CGIAR co-Authorhips"
 author: "IFPRI/CIAT"
-date:   "December, 2015. Last updated on `r Sys.Date()`"
+date:   "December, 2015. Last updated on `r Sys.Date()`. DRAFT, do not use or cite."
 output:
   html_document:
-    fig_height: 8
-    fig_width: 8
+    fig_height: 5
     toc: true
     toc_float: true    
     fig_caption: true  
@@ -48,7 +47,7 @@ towards authors with complete profiles and not necessarily a higher number of
 publications or citations.
 
 
-```{r setup} 
+```{r setup, results='hide'} 
  
 library(data.table)
 library(rvest)
@@ -56,10 +55,10 @@ library(stringr)
 library(igraph)
 library(networkD3)
 
-setwd("~/Dropbox (IFPRI)/SDA/Projects/2016-Semantics")
+setwd("~/Projects/hc-shiny/cgiarPubs")
 
 # Load data snapshot
-load("./tmp/GoogleScholarCGIAR.RData")
+load("./tmp/GoogleScholar.RData")
 
 ```
 
@@ -118,7 +117,7 @@ scrape.coauthors <- function(id) {
 
 ```{r, eval=F}
 
-# Start scraping from root author down through its CGIAR co-authors
+# Start scraping from root author down through his CGIAR co-authors
 top.id <- scrape.coauthors(gs.root.author)$ids
 
 # Init
@@ -183,7 +182,7 @@ authors.
 First let's graph the relationships between authors and co-authors, trying to
 identify CGIAR-affiliated and non-CGIAR authors.
 
-```{r, eval=F}
+```{r, eval=F, results='hide'}
 
 ## Prepare data for igraph
 nodes <- cg.author
@@ -221,13 +220,17 @@ plot(net,
 Same as above with D3 interactive network graph. We'd like to color-code CGIAR
 center affiliations but this requires cleaning up organization records.
 
-```{r}
+```{r, results='hide'}
 
 # Add node attributes (incl. cluster membership via random walk)
 tmp <- membership(cluster_walktrap(net))
 nodes[, label := paste(fullName, title, keywords, sep=" - ")]
 setkey(nodes, ID)
 nodes[J(as.integer(names(tmp))), cluster := as.vector(tmp)]
+
+```
+
+```{r}
 
 # Color-code affiliation
 forceNetwork(links, nodes,
@@ -238,6 +241,13 @@ forceNetwork(links, nodes,
   Group="group", 
   colourScale=JS("d3.scale.category10()"),
   zoom=T, legend=T)
+
+```
+
+ 
+
+
+```{r}
 
 # Color-code cluster
 forceNetwork(links, nodes,
@@ -251,6 +261,8 @@ forceNetwork(links, nodes,
 
 ```
 
+ 
+
 **TODO** We would also need to consolidate the list of organizations, identify
 country of affiliation, consolidate keywords using the latest CGIAR
 ontologies, then identify topical clusters of authors. Also need to look through
@@ -258,25 +270,11 @@ other repositories (e.g. [Web of
 Science](http://ipscience.thomsonreuters.com/product/web-of-science/)).
 
 
-```{r rpubs, eval=F}
+```{r, eval=F}
 
 # Save snapshot
 rm(list=ls()[ls() %like% "tmp"])
-save.image("./tmp/GoogleScholarCGIAR.RData")
+save.image("./tmp/GoogleScholar.RData")
 
 ```
-
-```{r rpubs, eval=F, echo=F}
-
-# Knit and upload to RPubs
-require(rsconnect)
-require(knitr)
-
-knit("./R/GoogleScholarCGIAR.Rmd", "./R/GoogleScholarCGIAR.html")
-res <- rpubsUpload("CGIAR-Authors", "./R/GoogleScholarCGIAR.html", "./R/GoogleScholarCGIAR.Rmd")
-if (!is.null(res$continueUrl)) browseURL(res$continueUrl) else stop(res$error)
-rpubsUpload("CGIAR-Authors", "./R/GoogleScholarCGIAR.html", "./R/GoogleScholarCGIAR.Rmd", id=res$id)
-
-```
-
 
