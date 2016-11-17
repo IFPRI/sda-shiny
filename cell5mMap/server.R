@@ -187,14 +187,14 @@ function(input, output, session) {
     #       title=titleWrap(selected$varTitle),
     #       labFormat=labelFormat(digits=2))
 
-    # Add clickable gridcells as circles
-    if (!selected$iso3 %in% c("SSA", usr$iso3)) {
-      leafletProxy("map") %>%
-        addCircles(data=dt, layerId=~CELL5M,
-          group=paste0(selected$iso3, " 10km grid"),
-          lng=~X, lat=~Y, radius=4000, stroke=F,
-          fillColor="#fff", fillOpacity=0)
-    }
+    # # Add clickable gridcells as circles
+    # if (!selected$iso3 %in% c("SSA", usr$iso3)) {
+    #   leafletProxy("map") %>%
+    #     addCircles(data=dt, layerId=~CELL5M,
+    #       group=paste0(selected$iso3, " 10km grid"),
+    #       lng=~X, lat=~Y, radius=4000, stroke=F,
+    #       fillColor="#fff", fillOpacity=0)
+    # }
 
 
   })

@@ -1,7 +1,7 @@
 ---
 title:  "Scrape CGIAR Publications from ScienceDirect, 1980-2016"
 author: "IFPRI/CIAT"
-date:   "October 2016. Last updated on `r Sys.Date()`. DRAFT, do not use or cite."
+date:   "October 2016. DRAFT, do not use or cite."
 output:
   html_document:
     fig_height: 5
@@ -30,7 +30,7 @@ GoogleScholar, and Zotero -- could be useful as well. Package `rscopus` provides
 a few helper methods to interact with Elsevier Scopus APIs.
 
 
-```{r setup}
+```{r setup, results='hide', message=FALSE}
 
 library(data.table)
 library(RefManageR)
@@ -39,11 +39,19 @@ library(stringr)
 library(ggplot2)
 library(pander)
 library(rscopus)
+library(listviewer) # Pretty print complex lists
 
 setwd("~/Projects/hc-shiny/cgiarPubs")
 
 # Load data snapshot
 load("./tmp/ScienceDirect.RData")
+
+# Helper
+"%||%" <- function(a, b) if (!is.null(a)) a else b
+
+# Set Scopus API key (hide key)
+options(elsevier_api_key=api_key)
+
 
 ```
 
@@ -60,12 +68,12 @@ names(bib) <- str_replace(str_replace(basename(f), "science_", ""), ".bib", "")
 
 ```{r, warning=FALSE}
 
-# Show first 2 records
-bib[[1]][1:2]
+# Show random record
+jsonedit(bib[1][[1:2]]) %>% je_simple_style()
 
 ```
 
-Note that author e-mail and affiliation are typically missing.
+Note that author e-mail and affiliation are typically missing, so an explicit connection with CGIAR is not easy to establish.
 
 ```{r, eval=F, results='hide'}
 
@@ -87,16 +95,12 @@ setkey(refs, url)
 refs <- unique(refs)
 
 # Make arbitrary unique publication IDs
-refs[, 
-  uid := tolower(paste(abbreviate(institution, minlength=3), str_pad(.I, 4, pad="0"), sep="-")),
-  by=institution]
+refs[, uid := tolower(paste(abbreviate(institution, minlength=3), 
+  str_pad(.I, 4, pad="0"), sep="-")), by=institution]
 
 ```
 
 ```{r}
-
-# Print records
-pander(refs[[1]][1:10])
 
 # Tally by CGIAR center
 ggplot(refs[, .N, keyby=institution], 
@@ -112,8 +116,10 @@ ggplot(refs[, .N, keyby=.(year=as.Date(year, "%Y"), Center=institution)],
   labs(x="", y="", title="CGIAR Publications over time (Elsevier, 1980-2016)")
 
 # Tally by journal (note these are Elsevier journals only)
-pander(refs[!is.na(journal), .N, keyby=journal][order(-N)][1:8])
-pander(refs[!is.na(journal), .N, keyby=journal][order(N)][1:8])
+pander(cbind(
+  refs[!is.na(journal), .N, keyby=journal][order(-N)][1:8], 
+  refs[!is.na(journal), .N, keyby=journal][order(N)][1:8]),
+  caption="Top and bottom 8 journals")
 
 ```
 
@@ -131,42 +137,33 @@ documented at https://cran.r-project.org/web/packages/rscopus/rscopus.pdf.
 
 ```{r, message=F, results='hide'}
 
-# Set API key
-options(elsevier_api_key=api_key)
-
 # Scopus can be searched against a publication DOI or PII.
 # Make PII explicit
 refs[, pii := str_replace(url, "http://www.sciencedirect.com/science/article/pii/", "")]
 
 # Use PII query
-tmp <- generic_elsevier_api(query="pii(0001706X89900223)", 
-  type="search", search_type="scopus", api_key=get_api_key())
+tmp <- generic_elsevier_api(query="pii(0001706X89900223)", type="search", 
+  search_type="scopus", api_key=api_key)
 
 ```
 
 ```{r}
 
-# Print response
-pander(tmp$content$`search-results`$entry[[1]])
+# Print API response
+jsonedit(tmp$content$`search-results`$entry[[1]]) %>% je_simple_style()
 
 ```
 
-```{r}
+ \ 
+
+```{r, eval=F}
 
 # Use affiliation query
-q <- "affil(ifpri)"
-tmp <- generic_elsevier_api(query=q, 
-  type="search", search_type="affiliation", api_key=get_api_key())
+tmp <- generic_elsevier_api(query="affil(ifpri)", type="search", search_type="affiliation")
 # => not authenticated (not sure that endpoint is working)
-tmp <- generic_elsevier_api(query=q, 
-  type="search", search_type="scopus", api_key=get_api_key())
-
-# Print first record
-pander(tmp$content$`search-results`$entry[[1]])
-
-tmp <- generic_elsevier_api(query="authlast(Rosegrant)", 
-  type="author", api_key=get_api_key())
+tmp <- generic_elsevier_api(query="authlast(Rosegrant)", type="author")
 # This author endpoint does not seem to work either: "RESOURCE_NOT_FOUND"
+tmp <- generic_elsevier_api(query="affil(ifpri)", type="search", search_type="scopus")
 
 ```
 
@@ -181,21 +178,13 @@ https://api.elsevier.com/content/search/author does not seem to work right now.
 # Helper - Return article citations, and 1st affiliation city and country from Scopus API
 scrapePII <- function(x) {
   q <- paste0("pii(", x, ")")
-  tmp <- generic_elsevier_api(query=q, type="search", search_type="scopus", api_key=get_api_key())
+  tmp <- generic_elsevier_api(query=q, type="search", search_type="scopus")
   tmp <- data.table(
     pii=x,
-    cited=ifelse(is.null(
-        tmp$content$`search-results`$entry[[1]]$`citedby-count`),
-      as.integer(NA), as.integer(tmp$content$`search-results`$entry[[1]]$`citedby-count`)),
-    affname=ifelse(is.null(
-        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affilname`),
-      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affilname`),
-    affcountry=ifelse(is.null(
-        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-country`),
-      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-country`),
-    affcity=ifelse(is.null(
-        tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-city`),
-      NA, tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-city`))
+    cited=tmp$content$`search-results`$entry[[1]]$`citedby-count` %||% as.integer(NA),
+    affname=tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affilname` %||% NA,
+    affcountry=tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-country` %||% NA,
+    affcity=tmp$content$`search-results`$entry[[1]]$affiliation[[1]]$`affiliation-city` %||% NA)
   return(tmp)
 }
 
@@ -523,6 +512,21 @@ pander(table(refs$nCGIARAuthor))
 
 
 ```
+
+
+# Consolidate list of affiliations
+
+```{r, eval=F}
+
+org <- refs[!is.na(affname), .(affname, affcountry, affcity)]
+setkey(org, affname, affcountry, affcity)
+org <- unique(org)
+org[1:10]
+
+```
+
+
+
 
 # Graph authorships
 

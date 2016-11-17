@@ -1,6 +1,6 @@
 ---
 title: "DREAM - Model Documentation"
-author: "You, Liangzhi (IFPRI); Bacou, Melanie (IFPRI)"
+author: "You, Liangzhi (IFPRI); Wood, Stanley (BMGF); Wood-Sichra, Ulrike (IFPRI);"
 date: "Updated on March 21, 2016"
 runtime: shiny
 output:

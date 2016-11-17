@@ -82,6 +82,7 @@ shinyUI(fluidPage(
       selectInput("fileType", "Choose Export Format", choices=c(
         `ESRI Shapefile`="shp", GeoTIFF="tif", netCDF="nc", CSV="csv", STATA="dta", `PDF Document`="pdf"),
         selected="csv"),
+
       downloadButton("saveData", "Save Layer"),
       p(br(), tags$label("Export formats"), br(), "NetCDF and GeoTIFF produce monthly
         multi-band rasters over the 1960-2013 period. ESRI Shapefile returns district

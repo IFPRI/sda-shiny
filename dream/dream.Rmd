@@ -1,6 +1,6 @@
 ---
 title: "DREAM Model - Main"
-author: "You, Liangzhi (IFPRI); Bacou, Melanie (IFPRI)"
+author: "You, Liangzhi (IFPRI); Wood-Sichra, Ulrike (IFPRI); Bacou, Melanie (IFPRI)"
 date: "Updated on Jan. 29, 2016"
 runtime: shiny
 output:
@@ -33,7 +33,7 @@ Declare all model arguments as arrays with sensible dimensions and default value
 
 ## Sets
 
-```{r}
+```{r, warning=FALSE}
 
 #####################################################################################
 # Sets
@@ -55,7 +55,7 @@ sets_dim <- sapply(sets, length, USE.NAMES=T)
 
 ## Variables
 
-```{r}
+```{r, warning=FALSE}
 
 #####################################################################################
 # Variables
@@ -78,7 +78,7 @@ C <- array(1, sets_dim, sets)
 ## Parameters
 
 
-```{r}
+```{r, warning=FALSE}
 
 #####################################################################################
 # Parameters
@@ -144,7 +144,7 @@ for(i in sets$com) for(t in sets$per) theta[i,,t,] <- diag(sets_dim[2])
 
 ## Demand and Supply
 
-```{r}
+```{r, warning=FALSE}
 
 
 #####################################################################################
@@ -208,7 +208,7 @@ curve((x-gamma[1,1,2])/delta[1,1,2], col="green", add=T)
 
 ## Technological Change
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 
 # Technology spillovers from source to receiving region                       # 2.10
 c_spill <- apply(theta, c("com", "reg", "per"), sum, na.rm=T)*c_own
@@ -308,7 +308,7 @@ plot(adoptL, 1, 11, xlab=NA, ylab="supply shift", sub="Logistic adoption")
 
 ```
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 
 # TODO Demand shift
 

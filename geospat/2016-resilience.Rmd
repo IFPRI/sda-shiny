@@ -1,0 +1,468 @@
+---
+title:  "Resilience Analysis - Ghana, Tanzania, Uganda"
+author: "IFPRI/HarvestChoice"
+date:   "Oct. 2016. Last updated on `r Sys.Date()`. DRAFT, do not use or cite!"
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 5
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+---
+  
+  
+```{r setup, message=FALSE}
+
+library(data.table)
+library(foreign)
+library(rgdal)
+library(spdep)
+library(splm)
+library(tmap)
+
+setwd("~/Projects/hc-shiny/geospat")
+load("./tmp/resilience.RData")
+
+```
+
+```{r helper, collapse=TRUE}
+
+# Display options
+library(pander)
+panderOptions("big.mark", ",")
+panderOptions("round", 2)
+panderOptions("missing", ".")
+panderOptions("table.split.table", 100)
+
+# Helper
+"%||%" <- function(a, b) if (!is.null(a)) a else b
+
+# Helper - Combine results from list of `splm` objects
+splm.combine <- function(x) data.table(
+  model=names(x), 
+  do.call(rbind, lapply(x, coef)), 
+  do.call(rbind, lapply(x, `[[`, "arcoef")),
+  phi=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["phi"]])))),
+  psi=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["psi"]])))),
+  rho=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["rho"]])))))
+
+# Helper - AIC function for `spml`, show goodness of fit measure
+# at https://stat.ethz.ch/pipermail/r-sig-geo/2016-February/024077.html
+godf.spml<-function(object, k=2, criterion=c("AIC", "BIC"),  ...) {
+  s <- summary(object)
+  l <- s$logLik[1,1]
+  np <- length(coef(s))
+  N <- nrow(s$model)
+  if (criterion=="AIC") {
+    aic <- -2*l+k*np
+    names(aic) <-"AIC"
+    return(aic)
+  }
+  if (criterion=="BIC") {
+    bic <- -2*l+log(N)*np
+    names(bic) <-"BIC"
+    if (k!=2) {
+      warning("parameter <k> not used for BIC")
+    }
+    return(bic)
+  }
+}
+
+```
+
+All biophysical variables were extracted by Mel/Tim (e.g. code at
+https://github.com/IFPRI/sda-rdata/blob/master/R/data_2016.R#L870) and Beliyou
+constructed long-term and seasonal summary variables. For the spatial panel analysis we use R package `splm` developed by Millo and Piras, 2009[^millo2009]. `splm` is documented at
+https://www.r-project.org/conferences/useR-2009/slides/Millo+Piras.pdf and
+http://facweb.knowlton.ohio-state.edu/pviton/courses/crp87105/millo-piras.pdf.
+Beliyou also suggested to try a "pooled" spatial regression combining
+weights at district and household levels.
+
+We need to test for spatial auto-correlation in the sample and test which of
+the SPEI, drought, temperature, travel time, elevation, and/or rainfall shock variable(s) to include in the model.
+
+
+# Literature review
+
+`splm` methods expect spatial panels in a particular format. Also note that `splm` commands for spatial panels expect a balanced dataset (same number of observations over time). Spatial locations should also be stable over time, though might be feasible to define time-dependent weight matrices $W_t$.
+
+
+## Spatial weights
+
+A good discussion of spatial weights and using **Rook/Queen contiguity** vs. **distance** (distance thresholds, k-nearest neighbor, or other) approach is in Chapter 9 Bivand 2008[^bivand2008].
+
+"*The first step is to define which relationships between observations are to be given a non-zero weight; that is to choose the neighbor criterion to be used; the second is to assign weights to the identified neighbor links.[...] analysing areal data is crucially dependent on the choices made in constructing the spatial weights.*"
+
+**Contiguity weights** are usually used with administrative units (e.g. districts), but other definitions are possible. Alternate options can be tested econometrically. From World Bank 2008[^wb2008] "*Rook and Queen Contiguity spatial weighting often leads to a very unbalanced structure. Larger units can have more neighbors and small units a smaller number of neighbors. The solution is to set a unique number of neighbors for all areas by creating a k-nearest neighbor weighting matrix. When geo-referenced coordinates are available, the spatial weights can be derived from the distance between different points. Euclidean distance weighting fixes a specified distance and then counts the number of neighbors that fall within that distance.*"
+
+On choosing a weight matrix, see also Elhorst, 2014[^elhorst2014]:
+
+"*As an alternative to **row-normalization**, W might be normalized such that the elements of each column sum to one. This type of normalization is sometimes used in the social economics literature (Leenders 2002). Note that the row elements of a spatial weights matrix display the impact on a particular unit by all other units, while the column elements of a spatial weights matrix display the impact of a particular unit on all other units. Consequently, **row normalization** has the effect that the impact on each unit by all other units is equalized, while **column normalization** has the effect that the impact of each unit on all other units is equalized.*"
+
+"*If we know little about the assumed spatial process, we try to avoid moving far from the binary representation (Bavaud, 1998).*"
+
+
+
+
+## Difference between spatial lag and spatial error models
+
+Fom Elhorst, 2014[^elhorst2014]:
+
+"*When specifying interaction between spatial units, the model may contain a spatially lagged dependent variable or a spatial autoregressive process in the error term, known as the **spatial lag** and the **spatial error** model, respectively.*"
+
+* "*The spatial lag model posits that the dependent variable depends on the dependent variable observed in neighboring units and on a set of observed local characteristics. According to Anselin et al. (2006, p. 6), the spatial lag model is typically considered as the formal specification for the equilibrium outcome of a spatial or social interaction process, in which the value of the dependent variable for one agent is jointly determined with that of the neighboring agents. In the empirical literature on strategic interaction among local governments, for example, the spatial lag model is theoretically consistent with the situation where taxation and expenditures on public services interact with taxation and expenditures on public services in nearby jurisdictions (Brueckner 2003).*"
+
+* "*The spatial error model, on the other hand, posits that the dependent variable depends on a set of observed local characteristics and that the error terms are correlated across space According to Anselin et al. (2006, p. 7), a spatial error specification does not require a theoretical model for a spatial or social interaction process, but, instead, is a special case of a nonspherical error covariance matrix. In the empirical literature on strategic interaction among local governments, the spatial error model is consistent with a situation where determinants of taxation or expenditures on public services omitted from the model are spatially autocorrelated, and with a situation where unobserved shocks follow a spatial pattern. A spatially autocorrelated error term may also be interpreted to reflect a mechanism to correct rent-seeking politicians for unanticipated fiscal policy changes (Allers and Elhorst 2005).*"
+
+
+## Fixed and random effects
+
+"*The spatial specific effects may be treated as fixed effects or as random effects. In the fixed effects model, a dummy variable is introduced for each spatial unit, while in the random effects model, $mu$ is treated as a random variable that is independently and identically distributed.*"
+
+* *[...] A related problem of controlling for spatial fixed effects is that any variable that does not change over time or only varies a little cannot be estimated, because it is wiped out by the demeaning transformation. This is the main reason for many studies not controlling for spatial fixed effects.*
+
+* *[...] A compromise solution to the all or nothing way of utilizing the crosssectional component of the data is the random effects model. This model avoids the loss of degrees of freedom incurred in the fixed effects model associated with a relatively large N and the problem that the coefficients of time-invariant variables cannot be estimated. However, whether the random effects model is an appropriate specification in spatial research remains controversial.*
+
+The random effects model can be tested against the fixed effects model using **Hausman's specification test** (Baltagi 2005, pp. 66-68) available in command `sphtest`. 
+
+
+## Example
+
+To start with let's try to replicate and understand Millo's example.
+
+
+```{r example, eval=F}
+
+# Look at the sample data provided in `splm`. In that example a proximity matrix is
+# constructed considering all the farms of the same village as neighbours. One can
+# expect both village-level heterogeneity and spatial correlation between farms
+# belonging to the same village. Spatial dependence is easier to justify for the error
+# terms, due to spillovers across neighbouring farms in idiosyncratic factors and
+# climate conditions; more difficult to find reasons for the inclusion of a spatial lag
+# of the dependent variable, as it seems unrealistic for the outcome in one farm to
+# influence those of neighbours.
+data(RiceFarms, riceww)
+RiceFarms <- data.table(RiceFarms)
+RiceFarms[, .N, keyby=time]
+# 171 obs in each period
+dim(riceww)
+# [1] 171 171
+RiceFarms[, .N, keyby=.(region, time)]
+# => stable # of obs, balanced dataset is used here
+
+# The full model formula
+fm <- log(goutput) ~ 
+  log(seed) + log(urea) + phosphate + 
+  log(totlabor) + log(size) + I(pesticide > 0) + I(varieties=="high") +
+  I(varieties=="mixed") + as.factor(region) + I(as.numeric(time) %in% c(1,3,5))
+
+# Make sure we can reproduce table 4. in Millo 2013
+errors <- c("semsrre", "sem2srre", "semre", "sem2re", "semsr", "srre", "sem", "re", "sr", "ols")
+mod <- lapply(errors, function(x) spreml(fm, data=RiceFarms, w=riceww, errors=x, lag=T))
+names(mod) <- errors
+
+```
+
+```{r, warning=FALSE}
+
+# Print results
+tmp <- splm.combine(mod)
+setnames(tmp, c(2:10), c("Y", "seed", "urea", "tsp", "lab", "size", "pest", "high", "mixed"))
+pander(tmp[, .SD, .SDcols=c(1:10, 17:20)])
+
+```
+
+Interpretation:
+
+* $phi$ individual effects
+* $psi$ the serial correlation coefficient, is significant but small
+* $rho$ spatial error correlation
+* $lamda$ spatial lag coefficient is non-significant
+
+
+# Data preparation, validation (GHA, TZA, UGA)
+
+```{r, eval=F}
+
+# Load Beliyou's Hhld variables (800MB, 2670 vars!)
+hh <- read.dta("./tmp/Combined_4_Mel.12.dta")
+
+# Keep STATA var labels
+hh.lbl <- data.table(varCode=names(hh), varLabel=attr(hh, "var.labels"))
+hh <- data.table(hh)
+
+# Load spatial features from biophysical workspace
+load("../../hc-data/out/2016.09/svyL2Maps_r16.09.RData")
+
+# Keep only the datasets and spatial features we need
+rm(list=ls()[!ls() %in% c("hh", "hh.lbl", "gps", "g2", "g2.lbl", "gps.pts", "iso3", "svy")])
+
+# For the panel regressions, we limit obs to 
+panels <- list(TZA=c("NPS09", "NPS11", "NPS13"), UGA=c("NPS10", "NPS11", "NPS12"))
+
+# Also list vars we want to include in the regression
+# STATA: xi:xtreg ${outcome`j'} ${cont`t'`i'`c'`v't`t'} $headcont $hhcont $wealth $bio $round $region 
+#          if $filter /*[pweight=weight_]*/, `p' vce(r)
+models <- list(
+  Y=c("pcexp_pppimp", "pcfoodexp_pppimp"), # take the ln()
+  X=list(
+    headcont=c("femhead", "agehead"),
+    hhcont=c("hhsize", "hhsizesq", "educave"),
+    wealth=c("landown", "tlu_total", "agwealth_paran", "nonagwealth_paran"), # "electricity"
+    bio=c("TT20k_hours", "elevation", "lgp"), # "far", "mean_popden2000""
+    health=c("malariain")
+  )
+)
+
+panels.hh <- hh[(ISO3=="TZA" & survey %in% panels$TZA) | (ISO3=="UGA" & survey %in% panels$UGA)]
+rm(hh)
+
+```
+
+## Balance survey panels
+
+
+```{r}
+
+# Tally obs across panels
+tmp <- panels.hh[, .N, keyby=.(ISO3, region=regionname, panel=survey)]
+tmp <- tmp[, lapply(.SD, paste, collapse=", "), .SDcols=c("N", "panel"), keyby=.(ISO3, region)]
+pander(tmp, caption="Obs. across panels")
+
+```
+
+```{r , eval=F}
+
+# TODO Append X,Y coordinates
+# Verify unique records first
+setkey(panels.hh, ISO3, survey, round, cluster, hhid)
+panels.hh[duplicated(panels.hh), unique(hhid)]
+
+# Balance panels (we need stable count of obs. across survey rounds)
+pander(panels.hh[balanced==1, .N, keyby=.(ISO3, survey, svyCode)], caption="Obs. across panels, balanced")
+
+
+# Summarize and graph/map regressor vars, check for missing data
+
+
+
+```
+
+
+## Summarize biophysical conditions and shocks
+
+```{r, eval=F}
+
+# Try to merge features and attributes across panels
+
+# Using SPEI, UDEL, and CHIRPS, map skewness of distribution
+
+
+# Add drought median duration
+
+
+# Map bio shock variables
+
+
+```
+
+## Test for spatial autocorrelation
+
+```{r}
+
+# Moran I test on all regressors and outcome variables
+
+# Collect results
+
+
+```
+
+
+# Generate spatial weights
+
+The LSMS-ISA panels provide GPS coords for all households. Intuitively we could try a few different approaches:
+
+* $W_1$ create spatial weights using k-nearest neighbors within a specific distance threshold (or enumeration area, or marketshed, or agro-ecological zone, or region/province) 
+* $W_2$ use *inverse travel times* weights (possibly within a distance or travel time threshold) 
+* $W_3$ simply use inverse distance weights between households.
+
+$W_1$ seems more common in the socio-economic literature. $W_3$ is more straightforward but Euclidian distances could be misleading. $W_2$ requires more work (e.g. can we use *Google Maps Distance Matrix API* to compute realistic travel times between all household locations?
+
+
+```{r w1, eval=F}
+
+# Generate NxN travel time matrix using Google Distance API
+api_key <- "AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck"
+
+# API quotas
+# entries per day: 2,500	
+# requests per 100 seconds: 10,000	
+# requests per 100 seconds per user: Unlimited
+# results are in seconds
+
+# Hit the API survey by survey, start with most recent panel
+i <- svy[3]
+tmp <- data.table(gps.pts@data[gps.pts$svyCode==i,])
+# Init matrix
+panels.tt <- matrix(as.numeric(NA), nrow=nrow(tmp), ncol=nrow(tmp))
+dimnames(panels.tt) <- c(tmp$hhid, tmp$hhid)
+
+# Helper - Google maps distance matrix API
+gmapsapi <- function(o, d) {
+  require(httr)
+  url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
+  out <- GET(url, query=list(origins=o, destinations=d, mode="driving", key=api_key))
+  out <- jsonlite::fromJSON(content(out, as="text"))
+  return(out$rows$elements[[1]]$duration$value)
+}
+
+# Hit the API and collect responses
+for (i in 1:nrow(tmp)[1]) {
+  N <- seq(i, nrow(tmp), 200)
+  for (j in 1:length(N)) {
+    f <- N[j]
+    t <- N[j+1]-1
+    panels.tt[i, f:t] <- gmapsapi(
+      tmp[i, paste(Y_mod, X_mod, sep=",")],
+      tmp[f:t, paste(Y_mod, X_mod, sep=",", collapse="|")])
+  }
+}
+#=> works but returns quite a few NAs
+
+# Map results
+l <- data.table(tmp[1, X_mod], tmp[1, Y_mod], tmp[-1, X_mod], tmp[-1,Y_mod])
+l <- lapply(1:nrow(l), function(i) list(L=Line(matrix(unlist(l[i,]), ncol=2, byrow=T)), i=i))
+l <- SpatialLines(lapply(l, function(E) Lines(list(E$L),as.character(E$i))),
+  proj4string=CRS("+init=epsg:4326"))
+l <- SpatialLinesDataFrame(l, data.frame(time=panels.tt[1,-1]/(60*60)))
+
+```
+
+```{r}
+
+tm_shape(World) + tm_polygons() +
+  tm_shape(l[1:2297,], is.master=T) + 
+  tm_lines(col="time", colorNA="white", lwd=.4, alpha=.4, title.col="travel (hours)") +
+  tm_style_grey()
+
+```
+
+Google API works but returns a lot of missing values between pairs of locations, seems difficult to avoid. Another approach is to use an arbitrary distance to define neighbors (e.g. 50km).
+
+
+```{r, eval=F}
+
+# Generate spatial neighbour list
+nb1 <- knn2nb(knearneigh(coords, k=50), row.names=paste(g2.nb$ISO3, g2.nb$rn, sep="."))
+summary(nb1)
+
+# Inverse distance matrix
+w1 <- lapply(nb1, function(x) 1/(x/1000))
+w1 <- nb2listw(nb1, glist=w1, style="B")
+
+summary(w1$weights)
+summary(sapply(w1$weights, sum))
+
+# Generate spatial neighbour list
+nb2 <- poly2nb(g2.nb, row.names=paste(g2.nb$ISO3, g2.nb$rn, sep="."))
+summary(nb2)
+
+# Distance matrix
+w2 <- nb2mat(nb2, style="W", zero.policy=T)
+
+
+
+
+
+```
+
+
+
+
+# Spatial panel regressions for Tanzania and Uganda (NPS panels)
+
+In short:
+
+1) `spfml` command estimates both **fixed effects** spatial lag and **error models** (with different methods to calculate the determinants, default `eigen`) and different effects:
+    * `pooled` constant term only
+    * `spfe` cross-sectional specific effects
+    * `tpfe` time-period specific effects
+    * `sptpfe` include both spatial and temporal fixed effects
+    
+`spfml` returns residuals, a table of estimated coefficients (`rho` is the coeff of the spatially lagged dependent variable). Fixed effects can be extracted using `effects(res)` that returns the type of effects with significance levels and the constant term.
+
+2) `spreml` command is used to generate **spatial random effects** with several error options:
+    * `semsrre` full (most general) model
+    * `semsr` serially and spatially correlated disturbances, no random effects
+    * `srre` serial correlation and random effects
+    * `semre` exclude serial correlation
+    * `re`traditional random effects model
+    * `sr` panel regression with serially correlated errors
+    * `sem` pooled model with spatially autocorrelated residuals
+    
+3) Command `bsktest` is used to test for random effects and spatial error correlation (e.g. Baltagi, Song and Koh SLM1 marginal test).
+
+4) Command `bsjktest` is used to test for joint, marginal and conditional tests for random effects, serial and spatial error correlation (takes a model formula as input).
+ 
+   
+   
+## Model specifications
+
+
+```{r}
+
+# Subsample to "rural != 0 & agri_hh != 0"
+
+# Start iterating across model specfications
+
+# Collect results
+
+```
+
+
+
+    
+# Pooled regressions for Ghana, Tanzania, Uganda cross-sections
+    
+
+    
+    
+```{r eval=F}
+
+
+  
+```
+    
+    
+    
+    
+    
+
+
+```{r eval=F}
+
+# Save snapshot
+rm(tmp, RiceFarms, riceww, x, i, j)
+save.image("./tmp/resilience.RData")
+
+```
+
+
+# References
+
+[^bivand2008]: Bivand, R.S., Pebesma, E.j., and Gomez-Rubio, V. (2008) "Applied Spatial Analysis with R". Springer. Online at http://gis.humboldt.edu/OLM/r/Spatial%20Analysis%20With%20R.pdf
+
+[^millo2009]: Millo, G and Piras, G. (2009) "splm: Spatial Panel data models in R", Journal of Statistical Software, Vol. VV, Issue II. Online at http://facweb.knowlton.ohio-state.edu/pviton/courses/crp87105/millo-piras.pdf
+
+[^millo2013]: Millo, G. (2013) "Maximum likelihood estimation of spatially and serially
+correlated panels with random effects", Elsevier preprint. Online at https://pdfs.semanticscholar.org/eebd/e2852fb273cd0f10b9d10009748c0ee68906.pdf
+
+[^elhorst2014]: Elhorst, J.P. (2014) Spatial Panel Data Models. Chapter C.2 in "Spatial Econometrics from Cross-Sectional Data to Spatial Panels" Spinger, 2014. University of Groningen. On-line at http://regroningen.nl/elhorst/doc/Spatial%20Panel%20Data%20Models.pdf
+
+[^matyas2016]: Matyas , L. (2016) "The Econometrics of Multi-dimensional Panels - Theory and Application", Springer. Online at http://www.metrixmdp.eu/
+
+[^nistor2007]: Nistor, A.P. (2007) "The Impact of Controlled Drainage on Agricultural Yiels: A Spatial Panel Model using Yield Monitor Data", Ph.D. Dissertation, Purdue University. Online at https://books.google.com/books?id=dZA2KvkZzE4C&lpg=PA122&ots=CJDOuZjpXO&dq=spatial%20panels%20unbalanced&pg=PP1#v=onepage&q=spatial%20panels%20unbalanced&f=false
+
+[^wb2008]: Elbers, C., Lanjouw, P. and Leite, P.G. (2008) "Brazil within Brazil: Testing the Poverty Map Methodology in Minas Gerais", World Bank Policy Research Working Paper #4513. Online at http://documents.worldbank.org/curated/en/941401468231893568/pdf/wps4513.pdf
+

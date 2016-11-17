@@ -1,0 +1,483 @@
+---
+title:  "SSA Poverty - Spatial Regression"
+author: "IFPRI/HarvestChoice"
+date:   "Sep. 2016. Last updated on `r Sys.Date()` DRAFT, do not use or cite!"
+output:
+  html_document:
+    fig_height: 5
+    toc: true
+    toc_float: true    
+    fig_caption: true    
+---
+
+
+```{r setup, message=FALSE}
+
+library(rgdal)
+library(foreign)
+library(data.table)
+library(spdep)
+library(tmap)
+
+```
+
+```{r, eval=F, echo=F}
+
+setwd("~/Projects/hc-shiny/geospat")
+load("./tmp/2016.05/poverty_r16.05.RData")
+
+```
+
+```{r, results='hide'}
+
+# Load districts and attributes
+g2 <- readOGR("../out/r16.05/shapefiles", "svyMaps_2016.06.22_sara")
+dt2 <- read.dta("../temp/2016.05/SSApoverty_Dist_forGWR.12.dta")
+
+# Keep STATA labels for re-use
+dt2.lbl <- data.table(varCode=names(dt2), varLabel=attr(dt2, "var.labels"))
+setkey(dt2.lbl, varCode)
+dt2.lbl[is.na(varLabel), varLabel := varCode]
+dt2 <- data.table(dt2)
+
+```
+
+```{r, results='hide'}
+
+# Make unique shape IDs explicit
+g2$rn <- row.names(g2)
+g2.dt <- data.table(g2@data)
+
+# Recode Ethiopia woredas
+dt2[svyCode=="eth2010", svyL2Cd := svyL1Cd * 10000 + svyL2Cd]
+
+# Merge shapes and attributes
+setkey(g2.dt, ISO3, svyCode, svyL1Cd, svyL2Cd)
+setkey(dt2, ISO3, svyCode, svyL1Cd, svyL2Cd)
+
+# Look for possible duplicates
+g2.dt[duplicated(dt2), .(ISO3, svyCode, svyL1Cd, svyL2Cd)]
+dt2[duplicated(dt2), .(ISO3, svyCode, svyL1Cd, svyL2Cd)]
+
+# Drop duplicated vars from Sara's file before merging
+dt2[, `:=`(
+  rn=NULL, svyL1Nm=NULL, svyL2Nm=NULL, prttyNm=NULL, areakm=NULL, X=NULL, Y=NULL)]
+
+```
+
+```{r}
+
+# Any unmatched obs?
+dt2[!g2.dt][, .N, by=svyCode]
+
+# Seems okay, so merge
+g2.dt <- dt2[g2.dt]
+
+# Re-attach Sara's attributes to shapes
+g2 <- SpatialPolygonsDataFrame(g2, data.frame(g2.dt), match.ID="rn")
+
+# Visually check a few vars
+tm_shape(g2) + tm_polygons("ndvi_ave", title=dt2.lbl["ndvi_ave", varLabel],
+  borders.lwd=0.1, borders.col="white", style="pretty", n=9, palette="RdYlGn", auto=F)
+tm_shape(g2) + tm_fill("pcexp_ppp_m", title=dt2.lbl["pcexp_ppp_m", varLabel],
+  borders.lwd=0.1, borders.col="white", style="jenks", n=9, auot=F)
+tm_shape(g2) + tm_fill("spei_lt", title=dt2.lbl["spei_lt", varLabel],
+  borders.lwd=0.1, borders.col="white", style="jenks", n=9, palette="RdYlGn", auto=F)
+
+```
+
+
+## Model specifications
+
+Four outcome variables `Y` and three alternate combinations of biophysical
+variables `X` are considered, for a total of 12 models.
+
+```{r nb, cache=T, results='hide'}
+
+# List of all 12 models to compare
+models <- list(
+  # pcexp
+  A1=list(
+    Y="pcexp_ppp_m", 
+    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
+    lab="Model A1"),
+  A2=list(
+    Y="pcexp_ppp_m", 
+    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
+    lab="Model A2"),
+  A3=list(
+    Y="pcexp_ppp_m", 
+    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
+    lab="Model A3"),
+
+  # foodexp
+  B1=list(
+    Y="foodexp_ppp_m", 
+    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
+    lab="Model B1"),
+  B2=list(
+    Y="foodexp_ppp_m", 
+    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
+    lab="Model B2"),
+  B3=list(
+    Y="foodexp_ppp_m", 
+    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
+    lab="Model B3"),
+
+  # foodshare
+  C1=list(
+    Y="foodshare", 
+    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
+    lab="Model C1"),
+  C2=list(
+    Y="foodshare", 
+    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
+    lab="Model C2"),  
+  C3=list(
+    Y="foodshare", 
+    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
+    lab="Model C3"),  
+
+  # wealth
+  D1=list(
+    Y="wealth_index_all", 
+    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
+    lab="Model D1"),
+  D2=list(
+    Y="wealth_index_all", 
+    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
+    lab="Model D2"), 
+  D3=list(
+    Y="wealth_index_all", 
+    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
+    lab="Model D3")
+  )
+
+```
+
+### Imputations
+
+In R spatial regression commands require all `X` variables to be non-missing.
+Here we use simple region median value (or country in case regional median is
+missing).
+
+```{r}
+
+X <- unique(unlist(sapply(models, '[[', "X")))
+X
+
+g2.dt <- data.table(g2@data)
+
+# Impute missing X values with regional median
+g2.dt[, spei_lt_imp := median(spei_lt, na.rm=T), by=.(svyCode, svyL1Cd)]
+g2.dt[is.na(spei_lt), spei_lt := spei_lt_imp]
+g2.dt[is.na(spei_lt), .N, by=svyCode]
+
+# Impute still missing X values with national median
+g2.dt[, spei_lt_imp := median(spei_lt, na.rm=T), by=svyCode]
+g2.dt[is.na(spei_lt), spei_lt := spei_lt_imp]
+
+# Verify
+g2.dt[is.na(spei_lt), .N, by=svyCode]
+
+
+# Tabulate
+
+
+# Re-attach imputed attributes to shapes
+g2 <- SpatialPolygonsDataFrame(g2, data.frame(g2.dt), match.ID=F)
+
+
+```
+
+
+## Spatial Weights
+
+Need to choose between QUEEN contiguity or we can also choose the k-nearest points/shapes as neighbors using `knn2nb()` instead of `poly2nb()`.  Can also assign neighbors based on a specified distance using `dnearneigh()`.
+
+Note that contiguity requires valid topology (which is surely not the case in this shapefile). Argument `snap` may be used to correct for slivers. Else one can use `edit(nn)` to make manual corrections to the matrix. Another approach to address non-contiguous splatial features is to use the feature centroid, or any weighted centroid (e.g. population weighted centroid of the admin unit).
+
+There's also the issue of choosing a method for the spatial weights (row-standardized, binary). Typically Row standardization is used to create proportional weights in cases where features have an unequal number of neighbors. Use Binary when you want comparable spatial parameters across different data sets with different connectivity structures.
+ 
+
+```{r}
+
+# Generate spatial neighbour list for SSA
+nb2 <- poly2nb(g2.nb, row.names=paste(g2.nb$ISO3, g2.nb$rn, sep="."))
+summary(nb2)
+
+# Verify the 5 discontiguous districts
+bad <- c("477", "1052", "1343", "1746", "1947")
+g2.nb.dt[rn %in% bad, .(rn, ISO3, svyL1Nm, svyL2Nm, pcexp_ppp_m)]
+
+for(i in c("AGO", "ETH", "SEN")) {
+  bb <- bbox(g2.nb[g2.nb$ISO3==i & g2.nb$rn %in% bad,])
+  bb <- bb + c(-.5, -.5, .5, .5)
+  print(
+    tm_shape(g2, bbox=bb) + tm_borders() +
+      tm_shape(g2.nb) + tm_fill("pcexp_ppp_m") + 
+      tm_shape(g2.nb[g2.nb$ISO3==i & g2.nb$rn %in% bad,]) +
+      tm_borders(col="red") + tm_text("svyL2Nm", col="red") +
+      tm_layout(legend.outside=T)
+  )}
+
+```
+
+They're not islands, but surrounding districts have no data. Need to check a
+little more what's going on, fix in QGIS if needed. Also refer to Bivand:
+
+> I did look at this 15 years ago with Boris Portnov, in the context of ESDA:
+>     
+> @incollection{bivand+portnov:04,   
+> author = {R. S. Bivand and B. A. Portnov},
+> editor = {L. Anselin and R. J. G. M. Florax and S. J. Rey},
+> title = {Exploring spatial data analysis techniques using {\RR}: the case of observations with no neighbours},
+> booktitle = {Advances in Spatial Econometrics: Methodology, Tools, Applications},   
+> year = {2004},   
+> publisher = {Springer},   
+> address = {Berlin},   
+> pages = {121--142}
+> }
+> 
+> There are oddities in the Moran scatterplot, and also in mapping the
+> graph-based neighbour representation into matrix form, say with the spatial
+> lag of a no-neighbour observation's value being zero (for zero.policy=TRUE).
+> That paper was the basis for the zero.policy= framework. There are other
+> consequences that you've found with respect to the number of subgraphs, which
+> may or may not break formal assumptions of analysis methods. In addition, we
+> don't know how far the broken assumptions actually matter. This would probably
+> be a good candidate for proper study including simulation.
+
+
+### Plot Contiguities
+
+
+```{r contiguity}
+
+# Plot contiguities in a few countries
+for (i in c("GHA", "ETH", "AGO", "SEN")) {
+  
+  tmp <- g2.nb[g2.nb$ISO3==i,]
+  coords.tmp <- coordinates(tmp)
+  nb2.tmp <- poly2nb(tmp)
+  nb2.tmp
+  
+  plot(g2[g2$ISO3==i,], col="red", lwd=0.1)
+  plot(tmp, col="grey90", lwd=0.1, add=T)
+  plot(nb2.tmp, coords.tmp, col="blue", add=T)
+  title(main=paste("Contiguity -", i), font.main=1)
+}
+
+
+```
+
+
+```{r}
+
+# Save distance matrix for SSA (W=row standardized) to STATA for re-use
+w2 <- nb2mat(nb2, style="W", zero.policy=T)
+w2 <- as.data.frame(w2)
+attr(w2, "var.labels") <- paste(g2$svyCode, g2$svyL1Cd, g2$svyL2Cd, sep=".")
+write.dta(w2, "../out/r16.05/poverty_continguity.dta", version=12)
+
+```
+
+
+
+```{r spatweights}
+
+# Check population weights
+summary(g2.nb$pop)
+
+# Spatial weights for SSA (check doco for how to include pop weights)
+# Note that If zero.policy is set to TRUE, weights vectors of zero length are inserted
+# for regions without neighbour in the neighbours list. 
+w <- nb2listw(nb2, zero.policy=T)
+
+```
+
+### Moran's I Statistic
+
+
+```{r moran}
+
+moran.plot(g2.nb@data[, Y], w, zero.policy=T,
+  xlim=c(0, 200), ylim=c(0, 200),
+  xlab=dt2.lbl[Y, varLabel], 
+  ylab=paste("Spatially Lagged", Y))
+
+#plot(
+#  variogram(as.formula(paste(Y, "~1")), 
+#    locations=coordinates(g2.nb), data=g2.nb, cloud=F), 
+#  type="b", pch=16, main=paste("Variogram of", dt2.lbl[Y, varLabel]))
+
+moran.mc(g2.nb@data[, Y], w, zero.policy=T, nsim=999)
+
+moran.plot(g2.nb@data[, X[1]], w, zero.policy=T,
+  xlab=dt2.lbl[X[1], varLabel], 
+  ylab=paste("Spatially Lagged", X[1]))
+
+moran.mc(g2.nb@data[, X[1]], w, zero.policy=T, nsim=999)
+
+
+```
+
+
+## Spatial Regressions (OLS, LAG, SAC)
+
+Batch run all 12 models using OLS, LAG, and SAC regressions and save results to
+draw comparisons.
+
+```{r models, cache=T}
+
+# Drop admin units with missing outcome values (not included in model)
+g2.nb <- g2[!is.na(g2[[x]]),]
+
+# Compare models
+fm <- as.formula(paste(Y, "~", paste(X, collapse="+")))
+fm
+
+# Model 1: simple OLS
+m <- lm(fm, data=g2.nb.dt, weights=1/pop)
+summary(m)
+
+# Examine spatial autocorrelation among the residuals
+lm.morantest(m, listw=w, zero.policy=T)
+
+# Model 2: LAG model
+mlagsar <- lagsarlm(fm, w, zero.policy=T, data=g2.nb.dt)
+summary(mlagsar)
+
+# Model 3: SAC model
+msacsar <- sacsarlm(fm, w, zero.policy=T, data=g2.nb.dt)
+summary(msacsar)
+
+# Also show impact effects of spatial models
+# To understand the direct (local), indirect(spill-over), and total effect of a unit 
+# change in each of the predictor variables
+W <- as(w, "CsparseMatrix")
+trMatc <- trW(W, type="mult")
+
+impacts(mlagsar, tr=trMatc, R=2000)
+impacts(msacsar, tr=trMatc, R=2000)
+
+summary(impacts(mlagsar, tr=trMatc, R=2000), zstats=T, short=T)
+summary(impacts(msacsar, tr=trMatc, R=2000), zstats=T, short=T)
+
+
+```
+
+The output from `impacts()` in the LAG model says that a 1 point increase in
+long-term SPEI leads to an increase in expenditure of PPP $11/month. A 1 sd
+increase in drought leads to a reduction in expenditure of PPP $20/month.
+
+
+```{r}
+
+# Label 20 districts at random
+rnd <- sample(1:nrow(g2.nb.dt), 20)
+
+# Plot OLS
+plot(m$model$pcexp_ppp_m, m$fitted.values,
+  main=m$call, xlab=fm, cex=.5, pch=16,
+  xlim=c(0, 300), ylim=c(0, 300))
+
+text(m$model$pcexp_ppp_m[rnd], m$fitted.values[rnd], 
+  labels=g2.nb.dt[rnd, svyL2Nm],
+  cex=.6, pos=4)
+
+# And residuals x fitted values
+plot(m, which=3)
+
+```
+
+
+```{r}
+
+# Plot LAG
+plot(mlagsar$y, mlagsar$fitted.values,
+  main=mlagsar$call, xlab=fm, cex=.5, pch=16,
+  xlim=c(0, 300), ylim=c(0, 300))
+
+text(mlagsar$y[rnd], mlagsar$fitted.values[rnd], 
+  labels=g2.nb.dt[rnd, svyL2Nm],
+  cex=.6, pos=4)
+
+```
+
+
+```{r}
+
+# Plot SAC
+plot(msacsar$y, msacsar$fitted.values,
+  main=msacsar$call, xlab=fm, cex=.5, pch=16,
+  xlim=c(0, 300), ylim=c(0, 300))
+
+text(msacsar$y[rnd], msacsar$fitted.values[rnd], 
+  labels=g2.nb.dt[rnd, svyL2Nm],
+  cex=.6, pos=4)
+
+```
+
+
+## Geographically Weighted Regression
+
+See Bivand at https://cran.r-project.org/web/packages/spgwr/vignettes/GWR.pdf
+and Anselin
+http://www.csiss.org/gispopsci/workshops/2011/PSU/readings/W15_Anselin2007.pdf.
+Also Brunsdon http://rpubs.com/chrisbrunsdon/101305.
+
+Note that sampling weights are not implemented. Choosing a method to estimate
+optimal bandwidth is unclear (check doco), also not clear how to choose a
+kernel function (default Gaussian).
+
+
+```{r gwr, cache=T}
+
+# Load package
+library(spgwr)
+
+# Try GWR/LM on same model as above (pass shapes, will return shapes with coeff)
+bwG <- gwr.sel(fm, data=g2.nb, gweight=gwr.Gauss, verbose=FALSE)
+gwrG <- gwr(fm, data=g2.nb, bandwidth=bwG, gweight=gwr.Gauss, hatmatrix=TRUE)
+gwrG
+
+# Map coefficients
+data(World)
+
+for (i in X) {print(
+    tm_shape(gwrG$SDF, is.master=T) + 
+      tm_fill(i, palette="RdYlGn", style="jenks", n=9,
+        title=stringr::str_wrap(dt2.lbl[Y, varLabel], 30)) +
+      tm_shape(World) + tm_borders(lwd=0.1) +
+      tm_layout(
+        title=dt2.lbl[i, varLabel],
+        title.snap.to.legend=T, legend.outside=T)
+  )}
+
+
+```
+
+
+```{r ggwr, eval=F}
+
+# Could also try a GWR/GLM on same model as above
+bwG <- ggwr.sel(fm, data=g2.nb, gweight=gwr.Gauss, verbose=FALSE)
+gwrG <- ggwr(fm, data=g2.nb, bandwidth=bwG, gweight=gwr.Gauss, hatmatrix=TRUE,
+  family="poisson")
+
+
+save.image("./temp/poverty_r16.05.RData")
+
+```
+
+
+```{r rpubs, eval=F, echo=F}
+require(rsconnect)
+res <- rpubsUpload("SSA Poverty", "./R/poverty_r16.05.html", "./R/poverty_r16.05.Rmd")
+if (!is.null(res$continueUrl)) browseURL(res$continueUrl) else stop(res$error)
+rpubsUpload("SSA Poverty", "./R/poverty_r16.05.html", "./R/poverty_r16.05.Rmd", id=res$id)
+
+```
+
+

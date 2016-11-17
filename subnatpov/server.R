@@ -173,13 +173,12 @@ shinyServer(function(input, output, session) {
   output$svar <- renderText({
     if (class(values$g)=="integer") return()
     as.character(
-      div(h3("Across Agro-Ecological Domains",
+      div(h3("Poverty Prevalence across Agro-Ecological Domains",
         tags$small(br(), names(iso)[iso==values$iso3], ",",
           varList[[values$var]]$name, "-", input$opts)),
-        p("Showing the number of under $2/day Poor and mean",
-          names(vars)[vars==values$var],
-          "across agro-ecological zones and zones of low, medium and high soil
-          fertility (as measured through mean organic carbon content at depth of 30 cm).")))
+        p("Showing the number of under $2/day Poor across agro-ecological zones and
+          zones of low, medium and high soil fertility (as measured through mean organic
+          carbon content at depth of 30 cm).")))
   })
 
 

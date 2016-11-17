@@ -36,7 +36,7 @@ shinyServer(function(input, output, session) {
     if(values$iso3 != "SSA") ext <- bbox(gpw.urb2[gpw.urb2$ISOALPHA==values$iso3,])
     else ext <- bbox(gpw.urb2)
     leafletProxy("map") %>%
-      fitBounds(ext[1,1], ext[2,1], ext[1,2], ext[2,2])
+      fitBounds(ext[1,1]-3, ext[2,1]-3, ext[1,2]+3, ext[2,2]+3)
 
   })
 
