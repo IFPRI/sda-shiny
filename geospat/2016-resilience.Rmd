@@ -293,7 +293,6 @@ $W_1$ seems more common in the socio-economic literature. $W_3$ is more straight
 ```{r w1, eval=F}
 
 # Generate NxN travel time matrix using Google Distance API
-api_key <- "AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck"
 
 # API quotas
 # entries per day: 2,500	

@@ -6370,6 +6370,10 @@ div.hc, div.hc-footer {
   color: #ffffff;
 }
 
+.fix .shiny-input-container {
+  width: 100%;
+}
+
 @media (min-width: 768px) {
 #ts {
   margin-top: -62px;
