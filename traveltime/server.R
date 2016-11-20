@@ -8,37 +8,100 @@
 
 
 #####################################################################################
+# Helper - Print map
+#####################################################################################
+printMap <- function(x, file) {
+  require(tmap)
+
+  # Need to reproject
+  x <- spTransform(x, CRS("+init=epsg:3857"))
+
+  p <- tm_shape(World) + tm_polygons(col="white", borders="grey90") +
+    tm_text("Country", size=0.9, col="grey70") +
+    tm_shape(x, is.master=T) +
+    tm_bubbles(col="mean", alpha=0.8, title="Locations") +
+    tm_credits("IFPRI/HarvestChoice, 2016. www.harvestchoice.org") +
+    tm_layout(bg.color="#5daddf", inner.margin=c(0,0.3,0,0), legend.position=c(0.02, 0.02))
+
+  save_tmap(p, file, width=6, units="in")
+}
+
+
+#####################################################################################
+# Helper - Archive spatial formats for download
+#####################################################################################
+writeRasterZip <- function(x, file, filename) {
+
+  # Convert to spatial
+
+  x <- SpatialPointsDataFrame(x[, .(X,Y)], data.frame(x),
+    proj4string=CRS("+init=epsg:4326"))
+
+  # Save
+  raster::shapefile(x, filename, overwrite=T)
+  f <- list.files(pattern=paste0(strsplit(filename, ".", fixed=T)[[1]][1], ".*"))
+  zip(paste0(filename, ".zip"), f, flags="-9Xjm", zip="zip")
+  file.copy(paste0(filename, ".zip"), file)
+  file.remove(paste0(filename, ".zip"))
+}
+
+
+
+#####################################################################################
 # Helper - Google Distance Matrix
 #####################################################################################
+google_api <- function(f, t, key) {
 
-google_api <- function(from, to, key) {
-
-  if (ncol(from)==1) {
-    from <- paste(from$ID, collapse="|")
+  if (ncol(f)==1) {
+    fromstr <- paste(f$ID, collapse="|")
   } else {
-    from <- paste(from$X, from$Y, sep=",", collapse="|")
+    fromstr <- paste(f$Y, f$X, sep=",", collapse="|")
   }
 
-  if (ncol(to)==1) {
-    to <- paste(to$ID, collapse="|")
+  if (ncol(t)==1) {
+    tostr <- paste(t$ID, collapse="|")
   } else {
-    to <- paste(to$X, to$Y, sep=",", collapse="|")
+    tostr <- paste(t$Y, t$X, sep=",", collapse="|")
   }
 
   url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
-  out <- GET(url, query=list(origins=from, destinations=to, mode="driving", key=key))
+  out <- GET(url, query=list(origins=fromstr, destinations=tostr, mode="driving", key=key))
   out <- fromJSON(content(out, as="text"))
 
-  # Keep `time` only (in seconds)
-  return(list(
-    response=out$all_headers[[1]],
-    data=out$rows$elements[[1]]))
+  # Convert JSON response to data.table and clean up
+  dt <- lapply(out$rows$elements, function(x) cbind(
+    t$ID, t$X, t$Y, x$status, x$distance, x$duration))
+
+  nm <- c("to", "X_to", "Y_to", "status", "dist_str", "dist_m", "time_str", "time_hrs")
+  dt <- lapply(dt, data.table)
+  dt <- lapply(dt, function(x) setnames(x, nm[1:ncol(x)]))
+  dt <- rbindlist(dt, fill=T)
+  setnames(dt, nm[1:ncol(dt)])
+
+  dt[, from := rep(f$ID, each=nrow(t))]
+  dt[, X_from := rep(f$X, each=nrow(t))]
+  dt[, Y_from := rep(f$Y, each=nrow(t))]
+  dt[, X_to := as.numeric(X_to)]
+  dt[, Y_to := as.numeric(Y_to)]
+
+  # Append empty columns if needed
+  if (ncol(dt) < 8) dt[, `:=`(
+    dist_str=as.character(NA),
+    dist_m=as.nmeric(NA),
+    time_str=as.character(NA),
+    time_hrs=as.numeric(NA))]
+
+  dt[, time_hrs := time_hrs/(60*60)]
+  setcolorder(dt, c("from", "to", "status",
+    "dist_str", "time_str", "dist_m", "time_hrs",
+    "X_from", "Y_from", "X_to", "Y_to"))
+
+  return(list(response=out, data=dt))
 }
 
 #####################################################################################
 # Helper - HERE Routing API
 #####################################################################################
-
 here_api <- function(from, to, key) {
   url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
   out <- GET(url, query=list(origins=from, destinations=to, mode="driving", key=key))
@@ -50,7 +113,6 @@ here_api <- function(from, to, key) {
 #####################################################################################
 # Helper - Make Polylines
 #####################################################################################
-
 toPolyLines <- function(x, coords) {
   l <- x[, .SD, .SDcols=coords]
   l <- lapply(1:nrow(l), function(i) list(L=Line(matrix(unlist(l[i,]), ncol=2, byrow=T)), i=i))
@@ -65,7 +127,7 @@ toPolyLines <- function(x, coords) {
 # Helper - Validate points from CSV strings
 #####################################################################################
 
-mapPoints <- function(x, group, session) {
+mapPoints <- function(x, group, session=NULL) {
 
   # Empty table
   dt.na <- data.table(ID=as.character(), X=numeric(), Y=numeric())
@@ -109,12 +171,14 @@ shinyServer(function(input, output, session) {
 
   # Init reactive values
   values <- reactiveValues(
-    dtFrom = initGPS[1],
-    dtTo = initGPS[2:3],
+    dtFrom = initGPS[1:2],
+    dtTo = initGPS[3:4],
     api1 = "GOOG",
     api2 = "NONE",
+    api_key_goog = api_key_goog,
+    api_key_here = api_key_here,
     mapTitle = "Google Distance Matrix",
-    res = google_api(initGPS[1], initGPS[2:3], api_key)
+    res = initResults
   )
 
   # Init map
@@ -129,36 +193,44 @@ shinyServer(function(input, output, session) {
       # Add HarvestChoice market access layers
       addTiles(
         options=tileOptions(opacity=.5),
-        urlTemplate="http://tile.harvestchoice.org/tt10/tt10_20k/{z}/{x}/{y}.png",
+        urlTemplate="http://tile.harvestchoice.org/tt10_20k/tt10_20k/{z}/{x}/{y}.png",
         group="Travel Times 20k") %>%
       hideGroup("Travel Times 20k") %>%
 
       addTiles(
         options=tileOptions(opacity=.5),
-        urlTemplate="http://tile.harvestchoice.org/tt10/tt10_50k/{z}/{x}/{y}.png",
+        urlTemplate="http://tile.harvestchoice.org/tt10_50k/tt10_50k/{z}/{x}/{y}.png",
         group="Travel Times 50k") %>%
       hideGroup("Travel Times 50k") %>%
 
-      # Add draw toolbar
-      addDrawToolbar(layerId="lyrFrom", group="Origins",
-        editOptions=editToolbarOptions(),
-        polylineOptions=F, polygonOptions=F, rectangleOptions=F, circleOptions=F,
-        markerOptions=drawMarkerOptions(repeatMode=T)) %>%
+      # # Add draw toolbar
+      # addDrawToolbar(layerId="draw", group="Draw",
+      #   editOptions=editToolbarOptions(),
+      #   polylineOptions=F, polygonOptions=F, rectangleOptions=F, circleOptions=F,
+      #   markerOptions=drawMarkerOptions(repeatMode=T)) %>%
+
+      # Add legends
+      addLegend(
+        title="Travel Times", layerId="lgdTT",
+        colors=rev(RColorBrewer::brewer.pal(8, "Spectral")),
+        labels=c("0 hr", "2 hrs", "4 hrs", "6 hrs", "8 hrs", "10 hrs", "12 hrs", "20 hrs"),
+        position="bottomright", className="info legend small") %>%
+
+      addLegend(
+        title="Locations", layerId="lgdPts",
+        colors=c("blue", "red"),
+        labels=c("origin", "destination"),
+        position="bottomright", className="info legend small") %>%
 
       # Add layer controls
       addLayersControl(
         overlayGroups=c(
-          "Origins", "Destinations",
+          "Origins", "Destinations", "Distances",
           "Travel Times 20k", "Travel Times 50k"),
-        position="bottomright",
-        options=layersControlOptions(collapsed=F)) %>%
+        position="bottomleft",
+        options=layersControlOptions(collapsed=F))
 
-      # Add legend
-      addLegend(
-        title="Locations",
-        colors=c("blue", "red"),
-        labels=c("origin", "destination"),
-        position="bottomright", layerId="lgd")
+
   )
 
   # Add dynamic point layers (react on values$dtFrom)
@@ -167,8 +239,7 @@ shinyServer(function(input, output, session) {
       clearGroup("Origins") %>%
       setView(mean(values$dtFrom$X), mean(values$dtFrom$Y), 6) %>%
       addCircleMarkers(lng=~X, lat=~Y, layerId=~ID, data=values$dtFrom,
-        color="blue", weight=2, radius=6, fillOpacity=.4,
-        options=markerOptions(draggable=T, title=~ID),
+        color="blue", weight=2, radius=8, fillOpacity=.4,
         popup=~paste0(
           "<label>Location</label><br/>", ID,
           "<br/><label>Longitude</label><br/>", X,
@@ -182,8 +253,7 @@ shinyServer(function(input, output, session) {
       clearGroup("Destinations") %>%
       setView(mean(values$dtTo$X), mean(values$dtTo$Y), 6) %>%
       addCircleMarkers(lng=~X, lat=~Y, layerId=~ID, data=values$dtTo,
-        color="red", weight=2, radius=6, fillOpacity=.4,
-        options=markerOptions(draggable=T, title=~ID),
+        color="red", weight=2, radius=8, fillOpacity=.4,
         popup=~paste0(
           "<label>Location</label><br/>", ID,
           "<br/><label>Longitude</label><br/>", X,
@@ -192,77 +262,114 @@ shinyServer(function(input, output, session) {
   )
 
   # Map title
-  output$mapTitle <- renderText(values$mapTitle)
+  observeEvent(input$selectAPI1, values$api1 <- input$selectAPI1)
+  output$mapTitle <- renderText(names(apiList)[apiList==values$api1])
 
   # Results
-  output$tbResults <- renderRHandsontable(rhandsontable(values$res$data))
+  output$tbResults <- renderRHandsontable(rhandsontable(
+    values$res$data[, .SD, .SDcols=-c(6,7)],
+    colHeaders=c("From", "To", "Status", "Distance", "Time",
+      "X-From", "Y-From", "X-To", "Y-To"),
+    readOnly=T, width="100%", stretchH="all"))
 
   # JSON responses
-  output$jsResults <- renderJsonedit(jsonedit(values$res$response) %>% je_simple_style())
+  output$jsResults <- renderJsonedit(jsonedit(values$res$response) %>%
+      je_simple_style())
 
 
   # Primary observer (react to main button)
-  observeEvent(input$btnMain, {
-    # Update reactive values
-    from <- mapPoints(input$txtFrom, "Origins", session)
-    to <- mapPoints(input$txtTo, "Destinations", session)
-
-    if (!class(values$from)[1]=="try-error" & !class(values$to)[1]=="try-error") {
-      # Trigger results
-      values$res <- google_api(from, to, api_key)
-      values$dtFrom <- from
-      values$dtTo <- to
-    }
-
-  })
+  observeEvent(input$btnMain, validtoAPI())
 
   # Map observers (redraw the map only if valid CSV input)
   observeEvent(input$btnFrom, values$dtFrom <- mapPoints(input$txtFrom, "Origins", session))
   observeEvent(input$btnTo, values$dtTo <- mapPoints(input$txtTo, "Destinations", session))
 
+  # Refresh API keys
+  observeEvent(input$btnKeyGOOG, values$api_key_goog <- input$txtKeyGOOG)
+  observeEvent(input$btnKeyHERE, values$api_key_here <- input$txtKeyHERE)
 
+  # show distance labels on click
+  observeEvent(input$map_marker_click, {
+    evt <- input$map_marker_click
+    if(is.null(evt)) return()
 
+    # Undo on subsequent mouse clicks
+    if (evt$id=="selected") {
+      leafletProxy("map") %>% showGroup("Origins") %>% clearGroup("Distances")
+      return()
+    }
 
+    # Show times
+    dt <- values$res$data[from==evt$id]
+    if(nrow(dt)==0) return()
 
-  # Drawing tools for origin points
-  observeEvent(input$map_Points_saved, {
-
-    # Clear map
-    leafletProxy("map", session) %>% clearGroup("Origins")
-
-    # Capture coordinates
-    X <- input$map_Points_created$geometry$coordinates[[1]]
-    Y <- input$map_Points_created$geometry$coordinates[[2]]
-    dt <- data.table(ID=1:length(X), X=X, Y=Y)
-    updateTextAreaInput(session, "txtFrom", value=wite.csv(dt, row.names=F))
-    values$dtFrom <- dt
+    leafletProxy("map") %>%
+      hideGroup("Origins") %>%
+      clearGroup("Distances") %>%
+      addCircleMarkers(evt$lng, evt$lat, color="yellow", radius=8, fillOpacity=.8,
+        layerId="selected", group="Distances") %>%
+      addLabelOnlyMarkers(data=dt,
+        lng=~X_to, lat=~Y_to, label=~paste(dist_str, time_str, sep=" | "),
+        labelOptions=labelOptions(noHide=T, direction="top"),
+        group="Distances")
 
   })
 
-  # Capture marker drag events
-  observeEvent(input$map_circle_dragend, {
 
-    evt <- as.data.table(input$map_marker_dragend)
-    setnames(evt, c("Y", "X", "ID"))
-    dt <- values$dtFrom
-    dt <- dt[!evt]
-    dt <- rbind(dt, evt, fill=T)
-    setkey(dt, ID)
-    values$dtFrom <- dt
-    updateTextAreaInput(session, "txtFrom", value=write.csv(dt, row.names=F))
-    createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
+  # Main validation
+  validtoAPI <- function() {
+
+    # Validate CSV input
+    from <- mapPoints(input$txtFrom, "Origins", session)
+    to <- mapPoints(input$txtTo, "Destinations", session)
+
+    values$dtFrom <- from
+    values$dtTo <- to
+
+    # Do not send more than 1,000 requests
+    if (nrow(from)>0 & nrow(to)>0 & nrow(from)*nrow(to)<=1000) {
+      # Hit API
+      values$res <- google_api(from, to, values$api_key_goog)
+      #values$res <- here_api(from, to, values$api_key_here)
+
+    } else {
+      # Raise alert
+      createAlert(session, alertId="alert1", anchorId="alertFrom",
+        content="Limit your request to 1,000 pairs of points if using your own API keys,
+        or to 200 pairs if using the default keys.",
+        style="danger", append=F)
+    }
+  }
+
+
+
+  # Download handler
+  output$btnSave <- downloadHandler(function() {
+    t <- ifelse(input$fileType=="shp", "zip", input$fileType)
+    paste0("pointsDistanceMatrix_", Sys.Date(), ".", t)
+
+  }, function(file) {
+    switch(input$fileType,
+      csv = write.csv(values$res$data, file, row.names=F, na=""),
+      shp = writeRasterZip(values$res$data, file, "pointsDistanceMatrix.shp"),
+      pdf = printMap(values$res$data, file)
+    )
   })
 
-  # # Drawing tools for destination points
-  # observeEvent(input$map_lyrTo_created, {
-  #   X <- input$map_lyrTo_created$geometry$coordinates[[1]]
-  #   Y <- input$map_lyrTo_created$geometry$coordinates[[2]]
-  #   dt <- data.table(ID=1:length(X), X=X, Y=Y)
-  #   updateTextAreaInput(session, "txtTo", value=toJSON(dt[, .(X, Y)]))
-  #   values$dtTo <- dt
+
+  # # Capture marker drag events
+  # observeEvent(input$draw_edited_features, {
+  #
+  #   evt <- as.data.table(input$draw_edited_features)
+  #   setnames(evt, c("Y", "X", "ID"))
+  #   dt <- values$dtFrom
+  #   dt <- dt[!evt]
+  #   dt <- rbind(dt, evt, fill=T)
+  #   setkey(dt, ID)
+  #   values$dtFrom <- dt
+  #   updateTextAreaInput(session, "txtFrom", value=write.csv(dt, row.names=F))
+  #   createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
   # })
-
-
 
 
 

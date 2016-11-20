@@ -11,4 +11,5 @@ Bacou, Melanie; Zhe, Guo.
 
 <label>How to cite</label>  
 If you use this tool in your published works please cite:  
-HarvestChoice, 2016. “*Using Routing and Travel Time APIs for sub-Saharan Africa (version 1.0)*” International Food Policy Research Institute, Washington, DC. Available on-line at http://tools.harvestchoice.org/traveltime/.
+
+HarvestChoice, 2016. *"Using Routing and Travel Time APIs for sub-Saharan Africa (version 1.0)"* International Food Policy Research Institute, Washington, DC. Available on-line at http://tools.harvestchoice.org/traveltime/.

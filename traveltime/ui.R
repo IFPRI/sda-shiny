@@ -24,7 +24,9 @@ shinyUI(fluidPage(
   fluidRow(style="position:relative;",
     leafletOutput("map", height=380, width="100%"),
     absolutePanel(class="well well-sm", top=5, right=5, width="20%", height="auto",
-      tags$label(htmlOutput("mapTitle")))
+      tags$label(htmlOutput("mapTitle")),
+      p("Click any of the origin locations to view travel times to destinations.
+        Click again to hide.", class="small"))
   ),
 
   # Main
@@ -35,23 +37,30 @@ shinyUI(fluidPage(
       p(br()),
       p("Use this tool to send requests to travel distance and routing APIs provided
         by Google, HERE, and OpenStreetMap."),
-      selectInput("selectAPI1", "Select 1 or any 2 services to use for this request",
+      selectInput("selectAPI1", "Select a service to use for this request",
         apiList[-1], selected="GOOG"),
-      selectInput("selectAPI2", "Optionally, compare with this service",
-        apiList, selected="NONE"),
+      # selectInput("selectAPI2", "Optionally, compare with this service",
+      #   apiList, selected="NONE"),
 
       hr(),
-      p("You will need to provide", strong("your own API keys"), "to send requests to",
+      p("You will need to provide", strong("your own API keys"), "to send large requests
+        to",
         a("Google", href="https://developers.google.com/maps/documentation/distance-matrix/usage-limits"),
         "and",
         a("HERE", href="https://developer.here.com/rest-apis/documentation/routing/topics/quick-start.html"),
-        "APIs. Please use the links here and register if needed. Else requests will be limited
-        to 5 origin and destination locations."),
+        "APIs. Without a key requests are limited to 200 pairs of locations. Please use the
+        links here and register if needed. Else requests will be limited to 5 origin
+        and destination locations."),
 
       textInput("txtKeyGOOG", "Your Google API key",
-        placeholder="Sign in with Google and enter your personal API key"),
+        placeholder="Sign in with Google and enter your API key"),
+      actionLink("btnKeyGOOG", "update", icon("refresh")),
+
+      p(br()),
+
       textInput("txtKeyHERE","Your HERE API key",
-        placeholder="Sign in with HERE and enter your personal API key"),
+        placeholder="Sign in with HERE and enter your API key"),
+      actionLink("btnKeyHERE", "update", icon("refresh")),
 
       # Credits
       hr(),
@@ -62,40 +71,50 @@ shinyUI(fluidPage(
     column(8,
 
       h3("Origins and Destinations"),
-      p("Use a CSV notation with at least a `X`, `Y`, and `ID` columns, or a simple
-list of addresses to geocode. Only the first 100 locations will be used."),
-
-      # Origins
-      div(class="fix",
-        textAreaInput("txtFrom", width="100%", rows=4, resize="vertical",
-          label="Origin locations",
-          value='
-"X", "Y", "ID"
-35.85439, -5.085751, "Location 1"
-39.25198, -6.860888, "Location 2"')
-      ),
-
-      bsAlert("alertFrom"),
-      actionButton("btnFrom", "Map Origins", icon("globe"), class="btn-success"),
+      p("Use a CSV notation with at least a",
+        code("X"), code("Y"), "and", code("ID"),
+        "columns, or a simple list of addresses to geocode."),
       p(br()),
 
-      # Destinations
-      div(class="fix",
-        textAreaInput("txtTo", width="100%", rows=4, resize="vertical",
-          label="Destination locations",
-          value='
+      fluidRow(
+
+        column(6,
+          # Origins
+          actionLink("btnFrom", "Map origin locations", icon("globe"), style="float:right;"),
+          div(class="fix",
+            textAreaInput("txtFrom", width="100%", rows=9, resize="vertical",
+              label="Origin locations",
+              value='
+"X","Y","ID"
+36.371494,-5.6112156,"Loc 01"
+35.89239,-4.2926636,"Loc 02"')
+          ),
+          bsAlert("alertFrom")
+        ),
+
+        column(6,
+          # Destinations
+          actionLink("btnTo", "Map destination locations", icon("globe"), style="float:right;"),
+          div(class="fix",
+            textAreaInput("txtTo", width="100%", rows=9, resize="vertical",
+              label="Destination locations",
+              value='
 "X", "Y", "ID"
 35.85439, -5.085751, "Location 1"
 39.25198, -6.860888, "Location 2"
 36.72286, -6.456619, "Location 3"')
+          ),
+          bsAlert("alertTo")
+        )
       ),
 
-      bsAlert("alertTo"),
-      actionButton("btnTo", "Map Destinations", icon("globe"), class="btn-success"),
-      actionButton("btnMain", "Generate Travel Times", icon("exchanges"), class="btn-primary", style="float: right;"),
+      actionButton("btnMain", "Generate Travel Times", icon("exchanges"), class="btn-primary"),
 
       # Results
       h3("Travel Times"),
+      p("Results are shown in the table below. The entire API response in JSON format
+        is also available. Use the download options below to save your results.
+        You can also use your keyboard Crtl+C/Ctrl+V to copy and paste entries."),
 
       tabsetPanel(
         tabPanel("Table",
@@ -121,7 +140,7 @@ list of addresses to geocode. Only the first 100 locations will be used."),
       ),
 
       HTML("<label>&nbsp;</label><br />"),
-      downloadButton("btnSave", "Save Results"),
+      downloadButton("btnSave", "Save Results", class="btn-info"),
 
       p(br(clear="left"), "Choose ESRI Shapefile to save the point locations
         shown on the maps, CSV to export a table of travel time statistics for the

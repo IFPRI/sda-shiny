@@ -31,7 +31,6 @@ raster::writeRaster(r, "./tt10.tif", bylayer=T, datatype="INT1U")
 
 # Load some hhld locations from the TZA LSMS-ISA (or from AR)
 load("../ar/data/ARPoints.RData")
-rm(alt, bad, pal.elev, strat.zmb, zmb)
 
 initGPS <- data.table(ar@data)
 initGPS <- initGPS[country=="United Republic of Tanzania"]
@@ -40,8 +39,13 @@ setnames(initGPS, c("X", "Y", "ID"))
 initGPS[, ID := paste0("Loc ", formatC(1:nrow(initGPS), flag="0", width=2))]
 
 
+# Validate Google API
+initResults <- google_api(initGPS[1:2], initGPS[3:4], api_key_goog)
+jsonedit(tmp$res)
+View(tmp$data)
+
 # Save this workspace for the TravelTime visualization
-
-
-
+rm(list=ls()[!ls() %in% c("initGPS", "initResults", "api_key_goog", "api_key_here",
+  "apiList", "je_simple_style")])
+save.image("./tmp/traveltime.RData")
 

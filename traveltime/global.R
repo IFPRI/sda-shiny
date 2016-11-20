@@ -9,7 +9,6 @@
 library(shiny)
 library(shinyBS)
 library(data.table)
-library(rgdal)
 library(leaflet)
 library(leaflet.extras)
 library(jsonlite)
