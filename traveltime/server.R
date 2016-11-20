@@ -229,7 +229,7 @@ shinyServer(function(input, output, session) {
     dt <- rbind(dt, evt, fill=T)
     setkey(dt, ID)
     values$dtFrom <- dt
-    updateTextAreaInput(session, "txtFrom", value=wite.csv(dt, row.names=F))
+    updateTextAreaInput(session, "txtFrom", value=write.csv(dt, row.names=F))
     createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
   })
 
