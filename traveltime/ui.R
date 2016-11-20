@@ -72,8 +72,7 @@ shinyUI(fluidPage(
 
       h3("Origins and Destinations"),
       p("Use a CSV notation with at least a",
-        code("X"), code("Y"), "and", code("ID"),
-        "columns, or a simple list of addresses to geocode."),
+        code("X"), code("Y"), "and", code("ID"), "columns."),
       p(br()),
 
       fluidRow(
@@ -143,7 +142,8 @@ shinyUI(fluidPage(
 
       p(br(clear="left"), "Choose ESRI Shapefile to save the point locations
         shown on the maps, CSV to export a table of travel time statistics for the
-        selected pairs of points.")
+        selected pairs of points."),
+      p(br())
     )
   ),
 
@@ -157,7 +157,7 @@ shinyUI(fluidPage(
 
     column(3,
       p("©IFPRI/HarvestChoice, 2015. Source code on",
-        a(href="https://github.com/ifpri/hc-shiny/tree/master/traveltime/", "GitHub."),
+        a(href="https://github.com/ifpri/sda-shiny/tree/master/traveltime/", "GitHub."),
         "Powered by", a(href="http://shiny.rstudio.com/", "RStudio Shiny."),
         "Code and datasets are licensed under a",
         a(href="http://creativecommons.org/licenses/by-nc-sa/4.0/",

@@ -18,7 +18,12 @@ library(rhandsontable) # pretty tables
 
 setwd("~/Projects/hc-shiny/traveltime")
 
-# Get HarvestChoice travel time rasters and create tiles using Mapbox
+# Keys
+# AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck
+api_key_goog <- "AIzaSyDtQ4aW92HbdUOwDfgtKUrEngIfgoJSThA"
+
+
+# Get HarvestChoice travel time rasters and create tiles
 tt <- hcapi3::hcapi(c("tt10_20k", "tt10_50k", "tt10_100k", "tt10_250k", "tt10_500k"))
 tt <- SpatialPixelsDataFrame(tt[, .(X, Y)], data.frame(tt),
   proj4string=CRS("+init=epsg:4326"))
@@ -30,6 +35,8 @@ raster::writeRaster(r, "./tt10.tif", bylayer=T, datatype="INT1U")
 
 
 # Load some hhld locations from the TZA LSMS-ISA (or from AR)
+rm(list=ls())
+load("./tmp/traveltime.RData")
 load("../ar/data/ARPoints.RData")
 
 initGPS <- data.table(ar@data)
@@ -47,5 +54,6 @@ View(tmp$data)
 # Save this workspace for the TravelTime visualization
 rm(list=ls()[!ls() %in% c("initGPS", "initResults", "api_key_goog", "api_key_here",
   "apiList", "je_simple_style")])
+
 save.image("./tmp/traveltime.RData")
 

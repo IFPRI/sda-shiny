@@ -48,15 +48,32 @@ google_api <- function(f, t, key) {
     tostr <- paste(t$Y, t$X, sep=",", collapse="|")
   }
 
+  # Make empty table structure
+  dt <- data.table(
+    from=character(),
+    to=character(),
+    status=character(),
+    dist_str=character(),
+    dist_m=numeric(),
+    time_str=character(),
+    time_hrs=numeric(),
+    X_from=numeric(),
+    Y_from=numeric(),
+    X_to=numeric(),
+    Y_to=numeric()
+    )
+
+  nm <- names(dt)[c(2,10,11,3:7)]
   url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
   out <- GET(url, query=list(origins=fromstr, destinations=tostr, mode="driving", key=key))
   out <- fromJSON(content(out, as="text"))
+
+  if(is.null(out$rows$elements)) return(list(response=out, data=dt))
 
   # Convert JSON response to data.table and clean up
   dt <- lapply(out$rows$elements, function(x) cbind(
     t$ID, t$X, t$Y, x$status, x$distance, x$duration))
 
-  nm <- c("to", "X_to", "Y_to", "status", "dist_str", "dist_m", "time_str", "time_hrs")
   dt <- lapply(dt, data.table)
   dt <- lapply(dt, function(x) setnames(x, nm[1:ncol(x)]))
   dt <- rbindlist(dt, fill=T)
@@ -171,7 +188,8 @@ shinyServer(function(input, output, session) {
       # Init view
       setView(mean(initGPS$X), mean(initGPS$Y), 6) %>%
       addTiles(
-        urlTemplate="http://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        #urlTemplate="http://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        urlTemplate="http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         attribution="OSM | HarvestChoice") %>%
 
       # Add HarvestChoice market access layers
@@ -194,7 +212,7 @@ shinyServer(function(input, output, session) {
       hideGroup("Travel Times 100k") %>%
 
       # # Add draw toolbar
-      # addDrawToolbar(layerId="draw", group="Draw",
+      # addDrawToolbar(layerId="draw", group="Drawn",
       #   editOptions=editToolbarOptions(),
       #   polylineOptions=F, polygonOptions=F, rectangleOptions=F, circleOptions=F,
       #   markerOptions=drawMarkerOptions(repeatMode=T)) %>%
@@ -335,8 +353,10 @@ shinyServer(function(input, output, session) {
     values$dtFrom <- from
     values$dtTo <- to
 
-    # Do not send more than 1,000 requests
-    if (nrow(from) > 0 & nrow(to)>0 & nrow(from)*nrow(to) <= 200) {
+    # Do not send more than 200 requests
+    apilimit <- ifelse(values$api_key_goog==api_key_goog, 200, 1000)
+
+    if (nrow(from) > 0 & nrow(to)>0 & nrow(from)*nrow(to) <= apilimit) {
       # Hit API
       values$res <- google_api(from, to, values$api_key_goog)
       #values$res <- here_api(from, to, values$api_key_here)
@@ -344,7 +364,7 @@ shinyServer(function(input, output, session) {
     } else {
       # Raise alert
       createAlert(session, alertId="alert1", anchorId="alertFrom",
-        content="Limit your request to 200 pairs of points if using your own API keys,
+        content="Limit your request to 1,000 pairs of points if using your own API keys,
         or to 200 pairs if using the default keys.",
         style="danger", append=F)
     }
@@ -366,19 +386,18 @@ shinyServer(function(input, output, session) {
   })
 
 
-  # # Capture marker drag events
-  # observeEvent(input$draw_edited_features, {
-  #
-  #   evt <- as.data.table(input$draw_edited_features)
-  #   setnames(evt, c("Y", "X", "ID"))
-  #   dt <- values$dtFrom
-  #   dt <- dt[!evt]
-  #   dt <- rbind(dt, evt, fill=T)
-  #   setkey(dt, ID)
-  #   values$dtFrom <- dt
-  #   updateTextAreaInput(session, "txtFrom", value=write.csv(dt, row.names=F))
-  #   createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
-  # })
+  # Capture marker drag events
+  observeEvent(input$map_draw_edited_features, {
+    evt <- input$map_draw_edited_features
+    # evt <- lapply(evt, function(x) data.table(X=x$lng, Y=x$lat))
+    # evt <- rbindlist(evt)
+    # evt[, ID := paste("Drawn", formatC(1:nrow(evt), width=2, flag=0))]
+    #updateTextAreaInput(session, "txtFrom", value=write.csv(evt, row.names=F))
+    createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
+    leafletProxy("map") %>% clearGroup("Drawn")
+    output$jsResults <- renderJsonedit(jsonedit(evt) %>% je_simple_style())
+    #values$dtFrom <- evt
+  })
 
 
 
