@@ -14,7 +14,7 @@ shinyUI(fluidPage(
   fluidRow(class="hc",
     column(9,
       h3("Travel Times for sub-Saharan Africa",
-        tags$small("Interact with Google Distance Matrix, HERE, and OSRM APIs"))),
+        tags$small("Market access and road networks"))),
     column(2, offset=1,
       h5(a(href="http://harvestchoice.org/", title="Home",
         img(src="../assets/global_logo.png", alt="Home"))))
@@ -61,8 +61,8 @@ shinyUI(fluidPage(
 
     column(8,
 
-      h2("Origins and Destinations"),
-      p("Use a CSV notation with at least a `X`, `Y`, and `Loc` columns, or a simple
+      h3("Origins and Destinations"),
+      p("Use a CSV notation with at least a `X`, `Y`, and `ID` columns, or a simple
 list of addresses to geocode. Only the first 100 locations will be used."),
 
       # Origins
@@ -95,14 +95,14 @@ list of addresses to geocode. Only the first 100 locations will be used."),
       actionButton("btnMain", "Generate Travel Times", icon("exchanges"), class="btn-primary", style="float: right;"),
 
       # Results
-      h2("Travel Times"),
+      h3("Travel Times"),
 
       tabsetPanel(
         tabPanel("Table",
           p(br(), "Driving time for each pair of locations."),
           rHandsontableOutput("tbResults", width="100%")
         ),
-        tabPanel("JSON",
+        tabPanel("JSON Response",
           p(br(), "Entire JSON response."),
           jsoneditOutput("jsResults", height="280px")
         )

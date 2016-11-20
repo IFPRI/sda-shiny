@@ -1,4 +1,5 @@
 
+![](./assets/wordmark-HarvestChoice.png)
 
 ## HarvestChoice Data Visualization Tools
 
@@ -10,11 +11,12 @@ Data query and visualization tools using R/Shiny framework:
 - [DREAM Model](http://tools.harvestchoice.org/dream) :: DREAM model core routine and documentation
 - [HarvestChoice CELL5M-SSA Bulk Download](http://harvestchoice.org/page/bulk) :: options to download HarvestChoice 5-arc-minute indicators for sub-Saharan Africa in bulk.
 - [Population Hotspots in SSA](http://tools.harvestchoice.org/popTrends) :: 20-year population trends with distinction between coastal and hinterland areas 
+- [Travel Times for SSA](http://tools.harvestchoice.org/traveltime/) :: access to Google, HERE and OSM distance and routing APIs to return travel times over sub-Saharan Africa.
 
 
 
-## License
+### License
 
-This package is licensed to you under the terms of the [GNU General Public License](http://www.gnu.org/licenses/gpl.html) version 3 or later.
+These applications are licensed under a [Creative Commons Attribution-NonCommercial-ShareAlike 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/) International License.
 
-Copyright 2013-2016 IFPRI/HarvestChoice.
+Copyright 2013-2017 IFPRI/HarvestChoice.

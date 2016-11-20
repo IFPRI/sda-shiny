@@ -117,22 +117,41 @@ shinyServer(function(input, output, session) {
     res = google_api(initGPS[1], initGPS[2:3], api_key)
   )
 
-  # Init dynamic map (map reacts on values$dtFrom and values$dtTo)
+  # Init map
   output$map <- renderLeaflet(
     leaflet() %>%
       # Init view
       setView(mean(initGPS$X), mean(initGPS$Y), 6) %>%
       addTiles(
-        urlTemplate="http://{s}.tiles.mapbox.com/v3/jcheng.map-5ebohr46/{z}/{x}/{y}.png",
-        attribution="Mapbox") %>%
+        urlTemplate="http://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        attribution="OSM | HarvestChoice") %>%
 
-      # TODO Add HC market access
+      # Add HarvestChoice market access layers
+      addTiles(
+        options=tileOptions(opacity=.5),
+        urlTemplate="http://tile.harvestchoice.org/tt10/tt10_20k/{z}/{x}/{y}.png",
+        group="Travel Times 20k") %>%
+      hideGroup("Travel Times 20k") %>%
+
+      addTiles(
+        options=tileOptions(opacity=.5),
+        urlTemplate="http://tile.harvestchoice.org/tt10/tt10_50k/{z}/{x}/{y}.png",
+        group="Travel Times 50k") %>%
+      hideGroup("Travel Times 50k") %>%
 
       # Add draw toolbar
       addDrawToolbar(layerId="lyrFrom", group="Origins",
         editOptions=editToolbarOptions(),
         polylineOptions=F, polygonOptions=F, rectangleOptions=F, circleOptions=F,
         markerOptions=drawMarkerOptions(repeatMode=T)) %>%
+
+      # Add layer controls
+      addLayersControl(
+        overlayGroups=c(
+          "Origins", "Destinations",
+          "Travel Times 20k", "Travel Times 50k"),
+        position="bottomright",
+        options=layersControlOptions(collapsed=F)) %>%
 
       # Add legend
       addLegend(
@@ -164,6 +183,7 @@ shinyServer(function(input, output, session) {
       setView(mean(values$dtTo$X), mean(values$dtTo$Y), 6) %>%
       addCircleMarkers(lng=~X, lat=~Y, layerId=~ID, data=values$dtTo,
         color="red", weight=2, radius=6, fillOpacity=.4,
+        options=markerOptions(draggable=T, title=~ID),
         popup=~paste0(
           "<label>Location</label><br/>", ID,
           "<br/><label>Longitude</label><br/>", X,
@@ -178,7 +198,7 @@ shinyServer(function(input, output, session) {
   output$tbResults <- renderRHandsontable(rhandsontable(values$res$data))
 
   # JSON responses
-  output$jsResults <- renderJsonedit(je_simple_style(jsonedit(values$res$response)))
+  output$jsResults <- renderJsonedit(jsonedit(values$res$response) %>% je_simple_style())
 
 
   # Primary observer (react to main button)
@@ -220,7 +240,7 @@ shinyServer(function(input, output, session) {
   })
 
   # Capture marker drag events
-  observeEvent(input$map_marker_dragend, {
+  observeEvent(input$map_circle_dragend, {
 
     evt <- as.data.table(input$map_marker_dragend)
     setnames(evt, c("Y", "X", "ID"))
