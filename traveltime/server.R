@@ -6,39 +6,23 @@
 #####################################################################################
 
 
-
-#####################################################################################
-# Helper - Print map
-#####################################################################################
-printMap <- function(x, file) {
-  require(tmap)
-
-  # Need to reproject
-  x <- spTransform(x, CRS("+init=epsg:3857"))
-
-  p <- tm_shape(World) + tm_polygons(col="white", borders="grey90") +
-    tm_text("Country", size=0.9, col="grey70") +
-    tm_shape(x, is.master=T) +
-    tm_bubbles(col="mean", alpha=0.8, title="Locations") +
-    tm_credits("IFPRI/HarvestChoice, 2016. www.harvestchoice.org") +
-    tm_layout(bg.color="#5daddf", inner.margin=c(0,0.3,0,0), legend.position=c(0.02, 0.02))
-
-  save_tmap(p, file, width=6, units="in")
-}
-
-
 #####################################################################################
 # Helper - Archive spatial formats for download
 #####################################################################################
 writeRasterZip <- function(x, file, filename) {
+  require(raster)
 
   # Convert to spatial
-
+  x <- rbind(
+    x[, .(ID=from, X=X_from, Y=Y_from)],
+    x[, .(ID=to, X=X_to, Y=Y_to)])
+  setkey(x, ID)
+  x <- unique(x)
   x <- SpatialPointsDataFrame(x[, .(X,Y)], data.frame(x),
     proj4string=CRS("+init=epsg:4326"))
 
   # Save
-  raster::shapefile(x, filename, overwrite=T)
+  shapefile(x, filename, overwrite=T)
   f <- list.files(pattern=paste0(strsplit(filename, ".", fixed=T)[[1]][1], ".*"))
   zip(paste0(filename, ".zip"), f, flags="-9Xjm", zip="zip")
   file.copy(paste0(filename, ".zip"), file)
@@ -203,6 +187,12 @@ shinyServer(function(input, output, session) {
         group="Travel Times 50k") %>%
       hideGroup("Travel Times 50k") %>%
 
+      addTiles(
+        options=tileOptions(opacity=.5),
+        urlTemplate="http://tile.harvestchoice.org/tt10_100k/tt10_100k/{z}/{x}/{y}.png",
+        group="Travel Times 100k") %>%
+      hideGroup("Travel Times 100k") %>%
+
       # # Add draw toolbar
       # addDrawToolbar(layerId="draw", group="Draw",
       #   editOptions=editToolbarOptions(),
@@ -225,8 +215,8 @@ shinyServer(function(input, output, session) {
       # Add layer controls
       addLayersControl(
         overlayGroups=c(
-          "Origins", "Destinations", "Distances",
-          "Travel Times 20k", "Travel Times 50k"),
+          "Origins", "Destinations",
+          "Travel Times 20k", "Travel Times 50k", "Travel Times 100k"),
         position="bottomleft",
         options=layersControlOptions(collapsed=F))
 
@@ -278,11 +268,21 @@ shinyServer(function(input, output, session) {
 
 
   # Primary observer (react to main button)
-  observeEvent(input$btnMain, validtoAPI())
+  observeEvent(input$btnMain, {
+    leafletProxy("map") %>% showGroup("Origins") %>% clearGroup("Distances")
+    validtoAPI()
+  })
 
   # Map observers (redraw the map only if valid CSV input)
-  observeEvent(input$btnFrom, values$dtFrom <- mapPoints(input$txtFrom, "Origins", session))
-  observeEvent(input$btnTo, values$dtTo <- mapPoints(input$txtTo, "Destinations", session))
+  observeEvent(input$btnFrom, {
+    leafletProxy("map") %>% showGroup("Origins") %>% clearGroup("Distances")
+    values$dtFrom <- mapPoints(input$txtFrom, "Origins", session)
+  })
+
+  observeEvent(input$btnTo, {
+    leafletProxy("map") %>% showGroup("Origins") %>% clearGroup("Distances")
+    values$dtTo <- mapPoints(input$txtTo, "Destinations", session)
+  })
 
   # Refresh API keys
   observeEvent(input$btnKeyGOOG, values$api_key_goog <- input$txtKeyGOOG)
@@ -309,10 +309,19 @@ shinyServer(function(input, output, session) {
       addCircleMarkers(evt$lng, evt$lat, color="yellow", radius=8, fillOpacity=.8,
         layerId="selected", group="Distances") %>%
       addLabelOnlyMarkers(data=dt,
-        lng=~X_to, lat=~Y_to, label=~paste(dist_str, time_str, sep=" | "),
+        lng=~X_to, lat=~Y_to,
+        label=~gsub("NA", "--", paste(dist_str, time_str, sep=" | ")),
         labelOptions=labelOptions(noHide=T, direction="top"),
         group="Distances")
 
+  })
+
+
+  # Hide details on random map click
+  observeEvent(input$map_click, {
+    evt <- input$map_marker_click
+    #if(!is.null(evt)) return()
+    leafletProxy("map") %>% showGroup("Origins") %>% clearGroup("Distances")
   })
 
 
@@ -327,7 +336,7 @@ shinyServer(function(input, output, session) {
     values$dtTo <- to
 
     # Do not send more than 1,000 requests
-    if (nrow(from)>0 & nrow(to)>0 & nrow(from)*nrow(to)<=1000) {
+    if (nrow(from) > 0 & nrow(to)>0 & nrow(from)*nrow(to) <= 200) {
       # Hit API
       values$res <- google_api(from, to, values$api_key_goog)
       #values$res <- here_api(from, to, values$api_key_here)
@@ -335,7 +344,7 @@ shinyServer(function(input, output, session) {
     } else {
       # Raise alert
       createAlert(session, alertId="alert1", anchorId="alertFrom",
-        content="Limit your request to 1,000 pairs of points if using your own API keys,
+        content="Limit your request to 200 pairs of points if using your own API keys,
         or to 200 pairs if using the default keys.",
         style="danger", append=F)
     }

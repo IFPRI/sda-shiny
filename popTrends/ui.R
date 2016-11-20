@@ -80,7 +80,7 @@ shinyUI(fluidPage(
 
     column(3,
       p("©IFPRI/HarvestChoice, 2015. Source code on",
-        a(href="https://github.com/harvestchoice/hc-shiny/tree/master/popTrends", "GitHub."),
+        a(href="https://github.com/ifpri/hc-shiny/tree/master/popTrends", "GitHub."),
         "Powered by", a(href="http://shiny.rstudio.com/", "RStudio Shiny."),
         "Code and datasets are licensed under a",
         a(href="http://creativecommons.org/licenses/by-nc-sa/4.0/",

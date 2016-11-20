@@ -24,9 +24,9 @@ shinyUI(fluidPage(
   fluidRow(style="position:relative;",
     leafletOutput("map", height=380, width="100%"),
     absolutePanel(class="well well-sm", top=5, right=5, width="20%", height="auto",
-      tags$label(htmlOutput("mapTitle")),
-      p("Click any of the origin locations to view travel times to destinations.
-        Click again to hide.", class="small"))
+      h4(htmlOutput("mapTitle")),
+      p("Click any of the", strong("origin"), "locations to view travel times to destinations.
+        Click anywhere on the map to hide.", class="small"))
   ),
 
   # Main
@@ -49,22 +49,22 @@ shinyUI(fluidPage(
         "and",
         a("HERE", href="https://developer.here.com/rest-apis/documentation/routing/topics/quick-start.html"),
         "APIs. Without a key requests are limited to 200 pairs of locations. Please use the
-        links here and register if needed. Else requests will be limited to 5 origin
-        and destination locations."),
+        links here and register if needed."),
 
       textInput("txtKeyGOOG", "Your Google API key",
         placeholder="Sign in with Google and enter your API key"),
-      actionLink("btnKeyGOOG", "update", icon("refresh")),
+      actionLink("btnKeyGOOG", "update key", icon("refresh")),
 
       p(br()),
 
       textInput("txtKeyHERE","Your HERE API key",
         placeholder="Sign in with HERE and enter your API key"),
-      actionLink("btnKeyHERE", "update", icon("refresh")),
+      actionLink("btnKeyHERE", "update key", icon("refresh")),
 
       # Credits
       hr(),
-      includeMarkdown("./www/txtCredits.md")
+      includeMarkdown("./www/txtCredits.md"),
+      p(br())
 
     ),
 
@@ -108,7 +108,7 @@ shinyUI(fluidPage(
         )
       ),
 
-      actionButton("btnMain", "Generate Travel Times", icon("exchanges"), class="btn-primary"),
+      actionButton("btnMain", "Generate Travel Times", icon("exchange"), class="btn-primary"),
 
       # Results
       h3("Travel Times"),
@@ -134,8 +134,7 @@ shinyUI(fluidPage(
         selectInput("fileType", "Choose Export Format",
           choices=c(
             `ESRI Shapefile`="shp",
-            `Comma-separated (CSV)`="csv",
-            `PDF Map Document`="pdf"),
+            `Comma-separated (CSV)`="csv"),
           selected="csv")
       ),
 
@@ -144,7 +143,7 @@ shinyUI(fluidPage(
 
       p(br(clear="left"), "Choose ESRI Shapefile to save the point locations
         shown on the maps, CSV to export a table of travel time statistics for the
-        selected pairs of points. Choose PDF to export the map in a printable format.")
+        selected pairs of points.")
     )
   ),
 
@@ -158,7 +157,7 @@ shinyUI(fluidPage(
 
     column(3,
       p("©IFPRI/HarvestChoice, 2015. Source code on",
-        a(href="https://github.com/harvestchoice/hc-shiny/tree/master/traveltime/", "GitHub."),
+        a(href="https://github.com/ifpri/hc-shiny/tree/master/traveltime/", "GitHub."),
         "Powered by", a(href="http://shiny.rstudio.com/", "RStudio Shiny."),
         "Code and datasets are licensed under a",
         a(href="http://creativecommons.org/licenses/by-nc-sa/4.0/",
