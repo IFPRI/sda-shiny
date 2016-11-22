@@ -24,7 +24,7 @@ shinyUI(fluidPage(
   fluidRow(style="position:relative;",
     leafletOutput("map", height=380, width="100%"),
     absolutePanel(class="well well-sm", top=5, right=5, width="20%", height="auto",
-      h4(htmlOutput("mapTitle")),
+      h4(textOutput("mapTitle", inline=T)),
       p("Click any of the", strong("origin"), "locations to view travel times to destinations.
         Click anywhere on the map to hide.", class="small"))
   ),
@@ -35,9 +35,9 @@ shinyUI(fluidPage(
     column(4,
 
       p(br()),
-      p("Use this tool to send requests to travel distance and routing APIs provided
+      p("Use this tool to send (bulk) requests to travel distance and routing APIs provided
         by Google, HERE, and OpenStreetMap."),
-      selectInput("selectAPI1", "Select a service to use for this request",
+      selectInput("selectAPI1", "Select a service to use",
         apiList[-1], selected="GOOG"),
       # selectInput("selectAPI2", "Optionally, compare with this service",
       #   apiList, selected="NONE"),
@@ -55,9 +55,11 @@ shinyUI(fluidPage(
         placeholder="Sign in with Google and enter your API key"),
       actionLink("btnKeyGOOG", "update key", icon("refresh")),
 
-      p(br()),
+      p(br(), "HERE API requires both an App ID and an App Code."),
 
-      textInput("txtKeyHERE","Your HERE API key",
+      textInput("txtKeyHEREid","Your HERE App ID",
+        placeholder="Sign in with HERE and enter your API key"),
+      textInput("txtKeyHEREcode","Your HERE App Code",
         placeholder="Sign in with HERE and enter your API key"),
       actionLink("btnKeyHERE", "update key", icon("refresh")),
 
@@ -99,9 +101,9 @@ shinyUI(fluidPage(
               label="Destination locations",
               value='
 "X", "Y", "ID"
-35.85439, -5.085751, "Location 1"
-39.25198, -6.860888, "Location 2"
-36.72286, -6.456619, "Location 3"')
+35.85439, -5.085751, "Loc 03"
+39.25198, -6.860888, "Loc 04"
+36.72286, -6.456619, "Loc 05"')
           ),
           bsAlert("alertTo")
         )
@@ -118,7 +120,8 @@ shinyUI(fluidPage(
       tabsetPanel(
         tabPanel("Table",
           p(br(), "Driving time for each pair of locations."),
-          rHandsontableOutput("tbResults", width="100%")
+          rHandsontableOutput("tbResults", width="100%"),
+          helpText(br(), textOutput("txtNoteHERE", inline=T), class="small")
         ),
         tabPanel("JSON Response",
           p(br(), "Entire JSON response."),

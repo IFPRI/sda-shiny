@@ -21,7 +21,14 @@ setwd("~/Projects/hc-shiny/traveltime")
 # Keys
 # AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck
 api_key_goog <- "AIzaSyDtQ4aW92HbdUOwDfgtKUrEngIfgoJSThA"
+api_key_here <- c(app_id="JyAEQWONPJRdajOHClCc", app_code="eCV-jVYOlYybP1cALBLe-g")
 
+apiList <- c(
+  `Do not compare`="NONE",
+  `Google Distance Matrix`="GOOG",
+  `Here Routing Matrix`="HERE",
+  `Open Source Routing Machine`="OSRM"
+)
 
 # Get HarvestChoice travel time rasters and create tiles
 tt <- hcapi3::hcapi(c("tt10_20k", "tt10_50k", "tt10_100k", "tt10_250k", "tt10_500k"))

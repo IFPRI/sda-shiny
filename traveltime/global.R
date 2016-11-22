@@ -16,6 +16,5 @@ library(httr)
 library(listviewer) # pretty print complex lists
 library(rhandsontable) # pretty tables
 
-options(shiny.trace=TRUE)
 
 load("./tmp/traveltime.RData")

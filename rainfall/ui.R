@@ -27,7 +27,7 @@ shinyUI(fluidPage(
       absolutePanel(class="panel panel-default",
         bottom=20, right=20, width=220, height="auto",
         div(class="panel-body",
-          uiOutput("details")
+          uiOutput("details", inline=T)
         )
       )
     )

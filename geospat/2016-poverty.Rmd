@@ -24,7 +24,7 @@ library(tmap)
 ```{r, eval=F, echo=F}
 
 setwd("~/Projects/hc-shiny/geospat")
-load("./tmp/2016.05/poverty_r16.05.RData")
+load("./tmp/poverty_r16.05.RData")
 
 ```
 

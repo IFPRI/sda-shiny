@@ -6374,6 +6374,14 @@ div.hc, div.hc-footer {
   width: 100%;
 }
 
+
+div.jsoneditor-menu {
+  display: none;
+}
+div.jsoneditor {
+  border: none;
+}
+
 @media (min-width: 768px) {
 #ts {
   margin-top: -62px;

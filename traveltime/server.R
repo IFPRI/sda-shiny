@@ -61,41 +61,26 @@ google_api <- function(f, t, key) {
     Y_from=numeric(),
     X_to=numeric(),
     Y_to=numeric()
-    )
+  )
 
-  nm <- names(dt)[c(2,10,11,3:7)]
+  nm <- names(dt)
   url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
   out <- GET(url, query=list(origins=fromstr, destinations=tostr, mode="driving", key=key))
-  out <- fromJSON(content(out, as="text"))
+  out <- fromJSON(content(out, as="text"), flatten=T)
 
   if(is.null(out$rows$elements)) return(list(response=out, data=dt))
 
   # Convert JSON response to data.table and clean up
-  dt <- lapply(out$rows$elements, function(x) cbind(
-    t$ID, t$X, t$Y, x$status, x$distance, x$duration))
-
-  dt <- lapply(dt, data.table)
-  dt <- lapply(dt, function(x) setnames(x, nm[1:ncol(x)]))
-  dt <- rbindlist(dt, fill=T)
-  setnames(dt, nm[1:ncol(dt)])
-
+  dt <- rbindlist(out$rows$elements, fill=T)
+  setnames(dt, c("status", "dist_str", "dist_m", "time_str", "time_hrs"))
   dt[, from := rep(f$ID, each=nrow(t))]
   dt[, X_from := rep(f$X, each=nrow(t))]
   dt[, Y_from := rep(f$Y, each=nrow(t))]
-  dt[, X_to := as.numeric(X_to)]
-  dt[, Y_to := as.numeric(Y_to)]
-
-  # Append empty columns if needed
-  if (ncol(dt) < 8) dt[, `:=`(
-    dist_str=as.character(NA),
-    dist_m=as.nmeric(NA),
-    time_str=as.character(NA),
-    time_hrs=as.numeric(NA))]
-
+  dt[, to := rep(t$ID, nrow(f))]
+  dt[, X_to := rep(t$X, nrow(f))]
+  dt[, Y_to := rep(t$Y, nrow(f))]
   dt[, time_hrs := time_hrs/(60*60)]
-  setcolorder(dt, c("from", "to", "status",
-    "dist_str", "time_str", "dist_m", "time_hrs",
-    "X_from", "Y_from", "X_to", "Y_to"))
+  setcolorder(dt, nm)
 
   return(list(response=out, data=dt))
 }
@@ -103,13 +88,101 @@ google_api <- function(f, t, key) {
 #####################################################################################
 # Helper - HERE Routing API
 #####################################################################################
-here_api <- function(from, to, key) {
-  url <- "https://maps.googleapis.com/maps/api/distancematrix/json"
-  out <- GET(url, query=list(origins=from, destinations=to, mode="driving", key=key))
-  out <- fromJSON(content(out, as="text"))
-  # Keep `time` only (in seconds)
-  return(out$rows$elements[[1]]$duration$value)
+here_api <- function(f, t, key) {
+
+  # Make empty table structure
+  dt <- data.table(
+    from=character(),
+    to=character(),
+    cost=numeric(),
+    X_from=numeric(),
+    Y_from=numeric(),
+    X_to=numeric(),
+    Y_to=numeric()
+  )
+
+  from <- paste(f$Y, f$X, sep=",")
+  to <- paste(t$Y, t$X, sep=",")
+  names(from) <- paste0("start", 1:length(from)-1)
+  names(to) <- paste0("destination", 1:length(to)-1)
+  l <- c(from, to, mode="fastest;car;traffic:disabled", key[1], key[2])
+
+  url <- "https://matrix.route.cit.api.here.com/routing/7.2/calculatematrix.json"
+  out <- GET(url, query=as.list(l))
+  out <- fromJSON(content(out, as="text"), flatten=T)
+
+  if(is.null(out$response$matrixEntry)) return(list(response=out, data=dt))
+  dt <- data.table(out$response$matrixEntry)
+
+  # Combine with from/to coords and loc names
+  f[, startIndex := 1:nrow(f)-1]
+  t[, destinationIndex := 1:nrow(t)-1]
+  setkey(f, startIndex)
+  setkey(dt, startIndex)
+  dt[f, from := ID]
+  dt[f, X_from := X]
+  dt[f, Y_from := Y]
+  setkey(t, destinationIndex)
+  setkey(dt, destinationIndex)
+  dt[t, to := ID]
+  dt[t, X_to := X]
+  dt[t, Y_to := Y]
+  dt[, `:=`(startIndex=NULL, destinationIndex=NULL)]
+  setnames(dt, 1, "cost")
+  setcolorder(dt, c("from", "to", "cost", "X_from", "Y_from", "X_to", "Y_to"))
+
+  return(list(response=out, data=dt))
 }
+
+
+#####################################################################################
+# Helper - OSRM Routing API (demo server)
+#####################################################################################
+osrm_api <- function(f, t, key=NULL) {
+
+  # Make empty table structure
+  dt <- data.table(
+    from=character(),
+    to=character(),
+    time_str=character(0),
+    time_hrs=numeric(),
+    X_from=numeric(),
+    Y_from=numeric(),
+    X_to=numeric(),
+    Y_to=numeric()
+  )
+
+  url <- "https://router.project-osrm.org/table/v1/driving/"
+  url <- paste0(url,
+    paste(f$X, f$Y, sep=",", collapse=";"), ";", paste(t$X, t$Y, sep=",", collapse=";"))
+  out <- GET(url,
+    query=list(
+      sources=paste(1:nrow(f)-1, collapse=";"),
+      destinations=paste(nrow(f):(nrow(f)+nrow(t)-1), collapse=";")))
+  out <- fromJSON(content(out, as="text"), flatten=T)
+
+  if(is.null(out$durations)) return(list(response=out, data=dt))
+  dt <- as.data.table(out$durations)
+  dt[, from := f$ID]
+  setnames(dt, c(t$ID, "from"))
+  dt <- melt(dt, id.vars="from", variable.name="to", value.name="time_hrs")
+  dt[, time_str := sprintf("%d hrs %d min", time_hrs%/%(60*60), time_hrs%%(60*60)%/%60)]
+  dt[, time_hrs := time_hrs/(60*60)]
+
+  # Combine with from/to coords and loc names
+  setkey(f, ID)
+  setkey(dt, from)
+  dt[f, X_from := X]
+  dt[f, Y_from := Y]
+  setkey(t, ID)
+  setkey(dt, to)
+  dt[t, X_to := X]
+  dt[t, Y_to := Y]
+  setcolorder(dt, c("from", "to", "time_str", "time_hrs", "X_from", "Y_from", "X_to", "Y_to"))
+
+  return(list(response=out, data=dt))
+}
+
 
 #####################################################################################
 # Helper - Make Polylines
@@ -212,10 +285,10 @@ shinyServer(function(input, output, session) {
       hideGroup("Travel Times 100k") %>%
 
       # # Add draw toolbar
-      # addDrawToolbar(layerId="draw", group="Drawn",
-      #   editOptions=editToolbarOptions(),
+      # addDrawToolbar(group="Origins",
+      #   editOptions=editToolbarOptions(selectedPathOptions=selectedPathOptions()),
       #   polylineOptions=F, polygonOptions=F, rectangleOptions=F, circleOptions=F,
-      #   markerOptions=drawMarkerOptions(repeatMode=T)) %>%
+      #   markerOptions=F) %>%
 
       # Add legends
       addLegend(
@@ -270,19 +343,29 @@ shinyServer(function(input, output, session) {
   )
 
   # Map title
-  observeEvent(input$selectAPI1, values$api1 <- input$selectAPI1)
   output$mapTitle <- renderText(names(apiList)[apiList==values$api1])
 
   # Results
-  output$tbResults <- renderRHandsontable(rhandsontable(
-    values$res$data[, .SD, .SDcols=-c(6,7)],
-    colHeaders=c("From", "To", "Status", "Distance", "Time",
-      "X-From", "Y-From", "X-To", "Y-To"),
-    readOnly=T, width="100%", stretchH="all"))
+  output$tbResults <- renderRHandsontable(switch(values$api1,
+    GOOG = rhandsontable(values$res$data[, .SD, .SDcols=-c(5,7)],
+      colHeaders=c("From", "To", "Status", "Distance", "Time",
+        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      height=min(40+nrow(values$res$data)*22, 487),
+      readOnly=T, width="100%", stretchH="all"),
+    HERE = rhandsontable(values$res$data,
+      colHeaders=c("From", "To", "Cost Factor",
+        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      height=min(40+nrow(values$res$data)*22, 487),
+      readOnly=T, width="100%", stretchH="all"),
+    OSRM = rhandsontable(values$res$data[, .SD, .SDcols=-c(4)],
+      colHeaders=c("From", "To", "Time",
+        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      height=min(40+nrow(values$res$data)*22, 487),
+      readOnly=T, width="100%", stretchH="all"),
+  ))
 
   # JSON responses
-  output$jsResults <- renderJsonedit(jsonedit(values$res$response) %>%
-      je_simple_style())
+  output$jsResults <- renderJsonedit(jsonedit(values$res$response))
 
 
   # Primary observer (react to main button)
@@ -303,8 +386,10 @@ shinyServer(function(input, output, session) {
   })
 
   # Refresh API keys
-  observeEvent(input$btnKeyGOOG, values$api_key_goog <- input$txtKeyGOOG)
-  observeEvent(input$btnKeyHERE, values$api_key_here <- input$txtKeyHERE)
+  observeEvent(input$btnKeyGOOG,
+    if(length(input$btnKeyGOOG)>8) values$api_key_goog <- input$txtKeyGOOG)
+  observeEvent(input$btnKeyHERE,
+    if(length(input$btnKeyHERE)>8) values$api_key_here <- c(input$txtKeyHEREid, input$txtKeyHEREcode))
 
   # show distance labels on click
   observeEvent(input$map_marker_click, {
@@ -328,7 +413,10 @@ shinyServer(function(input, output, session) {
         layerId="selected", group="Distances") %>%
       addLabelOnlyMarkers(data=dt,
         lng=~X_to, lat=~Y_to,
-        label=~gsub("NA", "--", paste(dist_str, time_str, sep=" | ")),
+        label=~switch(values$api1,
+          GOOG=gsub("NA", "--", paste(dist_str, time_str, sep=" | ")),
+          HERE=gsub("NA", "--", prettyNum(cost, big.mark=",")),
+          OSRM=gsub("NA", "--", time_str)),
         labelOptions=labelOptions(noHide=T, direction="top"),
         group="Distances")
 
@@ -350,6 +438,7 @@ shinyServer(function(input, output, session) {
     from <- mapPoints(input$txtFrom, "Origins", session)
     to <- mapPoints(input$txtTo, "Destinations", session)
 
+    # Update map
     values$dtFrom <- from
     values$dtTo <- to
 
@@ -358,8 +447,25 @@ shinyServer(function(input, output, session) {
 
     if (nrow(from) > 0 & nrow(to)>0 & nrow(from)*nrow(to) <= apilimit) {
       # Hit API
-      values$res <- google_api(from, to, values$api_key_goog)
-      #values$res <- here_api(from, to, values$api_key_here)
+      values$api1 <- input$selectAPI1
+
+      switch(values$api1,
+        GOOG = {
+          values$res <- google_api(from, to, values$api_key_goog)
+          output$txtNoteHERE <- renderText("")
+        },
+        HERE = {
+          values$res <- here_api(from, to, values$api_key_here)
+          output$txtNoteHERE <- renderText("HERE Cost Factor is an internal cost
+used for calculating the route. This value is based on the objective function of the routing
+engine and related to the distance or time, depending on the request settings (such as
+pedestrian versus car routes). The value may include certain penalties and represents
+the overall quality of the route with respect to the input parameters.")
+        },
+        OSRM = {
+          values$res <- osrm_api(from, to)
+          output$txtNoteHERE <- renderText("")
+        })
 
     } else {
       # Raise alert
@@ -371,11 +477,10 @@ shinyServer(function(input, output, session) {
   }
 
 
-
   # Download handler
   output$btnSave <- downloadHandler(function() {
     t <- ifelse(input$fileType=="shp", "zip", input$fileType)
-    paste0("pointsDistanceMatrix_", Sys.Date(), ".", t)
+    paste0("pointsDistanceMatrix_", values$api1, "_", Sys.Date(), ".", t)
 
   }, function(file) {
     switch(input$fileType,
@@ -394,7 +499,7 @@ shinyServer(function(input, output, session) {
     # evt[, ID := paste("Drawn", formatC(1:nrow(evt), width=2, flag=0))]
     #updateTextAreaInput(session, "txtFrom", value=write.csv(evt, row.names=F))
     createAlert(session, anchorId="alertFrom", content="Locations have been updated.")
-    leafletProxy("map") %>% clearGroup("Drawn")
+    #leafletProxy("map") %>% clearGroup("Drawn")
     output$jsResults <- renderJsonedit(jsonedit(evt) %>% je_simple_style())
     #values$dtFrom <- evt
   })
