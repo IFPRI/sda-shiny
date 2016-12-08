@@ -14,5 +14,5 @@
 .Rproj.user
 .project
 
-!/rainfall/data/g2*
-!/rainfall/data/*.rds
+!/rainfall/tmp/g2*
+!/rainfall/tmp/*.rds
