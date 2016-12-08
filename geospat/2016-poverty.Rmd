@@ -1,7 +1,7 @@
 ---
 title:  "SSA Poverty - Spatial Regression"
 author: "IFPRI/HarvestChoice"
-date:   "Sep. 2016. Last updated on `r Sys.Date()` DRAFT, do not use or cite!"
+date:   "Sep. 2016. Last updated on `r Sys.Date()` DRAFT, do not use or cite."
 output:
   html_document:
     fig_height: 5

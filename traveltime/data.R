@@ -17,6 +17,7 @@ library(rhandsontable) # pretty tables
 
 
 setwd("~/Projects/hc-shiny/traveltime")
+load("./tmp/traveltime.RData")
 
 # Keys
 # AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck
@@ -26,7 +27,7 @@ api_key_here <- c(app_id="JyAEQWONPJRdajOHClCc", app_code="eCV-jVYOlYybP1cALBLe-
 apiList <- c(
   `Do not compare`="NONE",
   `Google Distance Matrix`="GOOG",
-  `Here Routing Matrix`="HERE",
+  `HERE Routing Matrix`="HERE",
   `Open Source Routing Machine`="OSRM"
 )
 

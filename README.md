@@ -1,9 +1,13 @@
+---
+title:  Data Visualization Tools
+author: IFPRI/HarvestChoice
+date:   December 2016
+output: html_document
+---
 
 ![](./assets/wordmark-HarvestChoice.png)
 
-## HarvestChoice Data Visualization Tools
-
-Data query and visualization tools using R/Shiny framework:
+A series of data query and visualization tools for sub-Saharan Africa (using R/Shiny framework):
 
 - [Long-term Climatic Trends](http://tools.harvestchoice.org/rainfall) :: 1960-2013 CRU-TS 3.22 precipitation and PDSI for all districts in SSA
 - [sub-National Time-Series](http://tools.harvestchoice.org/subnatpov) :: sub-national expenditure, poverty and inequality estimates across 60 countries
