@@ -210,7 +210,7 @@ mapPoints <- function(x, group, session=NULL) {
   closeAlert(session, "alert2")
   dt <- try(fread(x))
 
-  if (class(dt)[1] != "data.table") {
+  if (!inherits(dt, "data.table")) {
     # Raise alert
     createAlert(session, alertId="alert1",
       anchorId=switch(group, Origins="alertFrom", Destinations="alertTo"),
@@ -445,15 +445,17 @@ shinyServer(function(input, output, session) {
     # Do not send more than 200 requests
     apilimit <- ifelse(values$api_key_goog==api_key_goog, 200, 1000)
 
-    if (nrow(from) > 0 & nrow(to)>0 & nrow(from)*nrow(to) <= apilimit) {
+    if (nrow(from) > 0 && nrow(to)>0 && nrow(from)*nrow(to) <= apilimit) {
       # Hit API
       values$api1 <- input$selectAPI1
 
       switch(values$api1,
+
         GOOG = {
           values$res <- google_api(from, to, values$api_key_goog)
           output$txtNoteHERE <- renderText("")
         },
+
         HERE = {
           values$res <- here_api(from, to, values$api_key_here)
           output$txtNoteHERE <- renderText("HERE Cost Factor is an internal cost
@@ -462,6 +464,7 @@ engine and related to the distance or time, depending on the request settings (s
 pedestrian versus car routes). The value may include certain penalties and represents
 the overall quality of the route with respect to the input parameters.")
         },
+
         OSRM = {
           values$res <- osrm_api(from, to)
           output$txtNoteHERE <- renderText("")

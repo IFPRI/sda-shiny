@@ -57,7 +57,7 @@ shinyUI(fluidPage(
           column(3,
             br(), br(),br(),
             radioButtons("opts", "Map indicator for the following sub-population", selected="total",
-              choice=c(
+              choices=c(
                 `entire population`="total",
                 `rural households`="rural",
                 `urban households`="urban",

@@ -1,38 +1,101 @@
 ---
-title:  "SSA Poverty - Spatial Regression"
-author: "IFPRI/HarvestChoice"
-date:   "Sep. 2016. Last updated on `r Sys.Date()` DRAFT, do not use or cite."
-output:
-  html_document:
+title:  SSA Poverty - Spatial Regression
+author: IFPRI/HarvestChoice
+date:   Last updated on `r Sys.Date()`. DRAFT, DO NOT USE OR CITE.
+output: 
+  html_notebook:
+    fig_caption: yes
     fig_height: 5
-    toc: true
-    toc_float: true    
-    fig_caption: true    
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
 ---
 
+This notebook is to replicate Sara's district-wise poverty regressions in R and explore alternate approaches to defining spatial weights across districts (testing for spatial autocorrelation in the series of predictors), and to map GWR coefficients. Sara's original code is taken from [3 Regression analysis district rural poverty - shock reg.do](https://www.dropbox.com/work/SDA/Data/analysis/_global_codes/do/SSA Dist Pov&CC/3 Reg district rural poverty.do).
 
-```{r setup, message=FALSE}
 
-library(rgdal)
+```{r, message=FALSE}
+
+library(raster)
 library(foreign)
 library(data.table)
 library(spdep)
+library(splm)
+library(spgwr)
 library(tmap)
+library(stringr)
 
 ```
 
-```{r, eval=F, echo=F}
+```{r, collapse=TRUE}
 
+# Presentation options
+library(pander)
+panderOptions("big.mark", ",")
+panderOptions("round", 2)
+panderOptions("missing", ".")
+panderOptions("table.split.table", 100)
+
+```
+
+```{r}
+
+# Load R workspace on BUSTER
 setwd("~/Projects/hc-shiny/geospat")
 load("./tmp/poverty_r16.05.RData")
+#setwd("~/Dropbox (IFPRI)/SDA/Data/analysis/_global_codes")
+#load("./temp/2016.05/poverty_r16.05.RData")
 
 ```
 
-```{r, results='hide'}
+```{r, collapse=TRUE}
+
+# Helper
+"%||%" <- function(a, b) if (!is.null(a)) a else b
+
+# Helper - Collect important coefficients from `splm` results
+# Could also check if there's an existing broom method for `splm` and `grw` models...
+splm.combine <- function(x) data.table(
+  model=names(x), 
+  do.call(rbind, lapply(x, coef)), 
+  do.call(rbind, lapply(x, `[[`, "arcoef")),
+  phi=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["phi"]])))),
+  psi=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["psi"]])))),
+  rho=as.numeric(do.call(rbind, lapply(x, function(x) try(x$errcomp[["rho"]])))))
+
+# Helper - AIC function for `spml`, show goodness of fit measure
+# Credits to https://stat.ethz.ch/pipermail/r-sig-geo/2016-February/024077.html
+spml.godf<-function(object, k=2, criterion=c("AIC", "BIC"),  ...) {
+  s <- summary(object)
+  l <- s$logLik[1,1]
+  np <- length(coef(s))
+  N <- nrow(s$model)
+  if (criterion=="AIC") {
+    aic <- -2*l+k*np
+    names(aic) <-"AIC"
+    return(aic)
+  }
+  if (criterion=="BIC") {
+    bic <- -2*l+log(N)*np
+    names(bic) <-"BIC"
+    if (k!=2) {
+      warning("parameter <k> not used for BIC")
+    }
+    return(bic)
+  }
+}
+
+```
+
+## Data
+
+```{r data}
 
 # Load districts and attributes
-g2 <- readOGR("../out/r16.05/shapefiles", "svyMaps_2016.06.22_sara")
-dt2 <- read.dta("../temp/2016.05/SSApoverty_Dist_forGWR.12.dta")
+g2 <- shapefile("./maps/svyMaps_2016.06.22_sara.shp")
+dt2 <- read.dta("./tmp/SSApoverty_Dist_forGWR.12.dta")
+#g2 <- shapefile("./out/r16.05/svyMaps_2016.06.22_sara.shp")
+#dt2 <- read.dta("./temp/2016.05/SSApoverty_Dist_forGWR.12.dta")
 
 # Keep STATA labels for re-use
 dt2.lbl <- data.table(varCode=names(dt2), varLabel=attr(dt2, "var.labels"))
@@ -42,7 +105,20 @@ dt2 <- data.table(dt2)
 
 ```
 
-```{r, results='hide'}
+```{r}
+
+# Verify that we have all explanatory variables and shocks already constructed, e.g.
+rbind(
+  dt2.lbl[varCode %like% "ndvi"],
+  dt2.lbl[varCode %like% "shock"],
+  dt2.lbl[varCode %like% "AEZ"],
+  dt2.lbl[varCode %like% "land"])
+
+```
+
+
+
+```{r map}
 
 # Make unique shape IDs explicit
 g2$rn <- row.names(g2)
@@ -56,112 +132,125 @@ setkey(g2.dt, ISO3, svyCode, svyL1Cd, svyL2Cd)
 setkey(dt2, ISO3, svyCode, svyL1Cd, svyL2Cd)
 
 # Look for possible duplicates
-g2.dt[duplicated(dt2), .(ISO3, svyCode, svyL1Cd, svyL2Cd)]
+g2.dt[duplicated(g2.dt), .(ISO3, svyCode, svyL1Cd, svyL2Cd)]
 dt2[duplicated(dt2), .(ISO3, svyCode, svyL1Cd, svyL2Cd)]
 
 # Drop duplicated vars from Sara's file before merging
 dt2[, `:=`(
   rn=NULL, svyL1Nm=NULL, svyL2Nm=NULL, prttyNm=NULL, areakm=NULL, X=NULL, Y=NULL)]
 
+# Any unmatched obs?
+dt2[!g2.dt, .N, by=svyCode]
+
 ```
 
 ```{r}
 
-# Any unmatched obs?
-dt2[!g2.dt][, .N, by=svyCode]
-
-# Seems okay, so merge
+# Seems okay, so let's merge
 g2.dt <- dt2[g2.dt]
 
 # Re-attach Sara's attributes to shapes
 g2 <- SpatialPolygonsDataFrame(g2, data.frame(g2.dt), match.ID="rn")
 
+```
+
+```{r viewvars}
+
 # Visually check a few vars
-tm_shape(g2) + tm_polygons("ndvi_ave", title=dt2.lbl["ndvi_ave", varLabel],
-  borders.lwd=0.1, borders.col="white", style="pretty", n=9, palette="RdYlGn", auto=F)
-tm_shape(g2) + tm_fill("pcexp_ppp_m", title=dt2.lbl["pcexp_ppp_m", varLabel],
-  borders.lwd=0.1, borders.col="white", style="jenks", n=9, auot=F)
-tm_shape(g2) + tm_fill("spei_lt", title=dt2.lbl["spei_lt", varLabel],
-  borders.lwd=0.1, borders.col="white", style="jenks", n=9, palette="RdYlGn", auto=F)
+data(World)
+p0 <- tm_shape(World) + tm_fill("grey90") + tm_shape(g2, is.master=T)
+p1 <- tm_shape(World) + tm_borders("grey50", lwd=.2)
+
+p0 + tm_fill("ndvi_ave", title="NDVI\nLong-term mean",
+  style="pretty", n=9, palette=rev(pal.nrwc), auto=F) + p1
+p0 + tm_fill("pcexp_ppp_m", title="Per Capita\nExpenditure\n(PPP USD/month)",
+  style="jenks", n=9, auto=F) + p1
+p0 + tm_fill("foodexp_ppp_m", title="Food Expenditure\n(PPP USD/month)",
+  style="jenks", n=9, auto=F) + p1
+p0 + tm_fill("pre_lt", title="Precipitation\nlong-term mean\n(mm)",
+  style="jenks", n=9, palette=pal.pre, auto=F) + p1
+p0 + tm_fill("spei_lt", title="SPEI\nlong-term mean",
+  style="jenks", n=9, palette="RdYlGn", auto=F) + p1
+p0 + tm_fill("nighlight_yearly", title="Night Light\nReflectance",
+  style="kmeans", n=9, palette=pal.earth[1:230], auto=F) + p1
+p0 + tm_fill("tt10_20k", title="Travel Time\nto nearest 20K market\n(hours)",
+  style="fixed", breaks=c(.5,1,2,4,6,8,10,12,24), palette="-YlOrRd", auto=F) + p1
 
 ```
 
 
-## Model specifications
+## Model Specifications
 
-Four outcome variables `Y` and three alternate combinations of biophysical
-variables `X` are considered, for a total of 12 models.
+Following Sara's setup, 2 outcome variables `Y`, 9 alternate groups of biophysical and climatic shock variables and 4 cross-combinations of predictors are considered, for a total of **72 models**. Sara chose a SAC form in STATA (equivalent to `sacsarlm()` in R).
 
-```{r nb, cache=T, results='hide'}
 
-# List of all 12 models to compare
-models <- list(
-  # pcexp
-  A1=list(
-    Y="pcexp_ppp_m", 
-    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
-    lab="Model A1"),
-  A2=list(
-    Y="pcexp_ppp_m", 
-    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
-    lab="Model A2"),
-  A3=list(
-    Y="pcexp_ppp_m", 
-    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
-    lab="Model A3"),
+```{r models, results="asis"}
 
-  # foodexp
-  B1=list(
-    Y="foodexp_ppp_m", 
-    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
-    lab="Model B1"),
-  B2=list(
-    Y="foodexp_ppp_m", 
-    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
-    lab="Model B2"),
-  B3=list(
-    Y="foodexp_ppp_m", 
-    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
-    lab="Model B3"),
+# Define outcome vars
+Y <- c("pcexp_ppp_m", "foodexp_ppp_m")
 
-  # foodshare
-  C1=list(
-    Y="foodshare", 
-    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
-    lab="Model C1"),
-  C2=list(
-    Y="foodshare", 
-    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
-    lab="Model C2"),  
-  C3=list(
-    Y="foodshare", 
-    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
-    lab="Model C3"),  
+# Define groups of explanatory vars
+X <- list(
+  socio    = c("hh_female", "agehead", "marriedhead", "meaneduc", "depratio2", "children"),
+  agri     = c("LGP_AVG", "ELEVATION", "cropland_pcap", "TLU_pcap"),
+  access   = c("nighlight_yearly", "tt10_20k", "PD12_TOT"),
+  weather1 = c("spei_lt", "L1_speidif", "L1_speidif2"),
+  weather2 = c("spei_lt", "Lcum_speidif", "Lcum_speidif2"), 
+  weather3 = c("spei_lt", "L1_speihishock", "L1_speiloshock"),
+  weather4 = c("pre_lt", "L1_predif", "L1_predif2", "temp_lt", "L1_tempdif", "L1_tempdif2"),
+  weather5 = c("pre_lt", "Lcum_predif", "Lcum_predif2", "temp_lt", "Lcum_tempdif", "Lcum_tempdif2"),
+  weather6 = c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
+  weather7 = c("ndvi_lt", "L1_ndvidif", "L1_ndvidif2"), 
+  weather8 = c("ndvi_lt", "Lcum_ndvidif", "Lcum_ndvidif2"), 
+  weather9 = c("ndvi_lt", "L1_ndvihishock", "L1_ndviloshock"),
+  other    = c("Malaria_yearly"),
+  AEZ      = c("arid_warm", "humid_cool", "humid_warm"),
+  country  = c("ISO3"),
+  yr       = c("year"))
 
-  # wealth
-  D1=list(
-    Y="wealth_index_all", 
-    X=c("spei_lt", "L1_speihishock", "L1_speiloshock"),
-    lab="Model D1"),
-  D2=list(
-    Y="wealth_index_all", 
-    X=c("spei_lt", "L1_speidif", "L1_speidif2"),
-    lab="Model D2"), 
-  D3=list(
-    Y="wealth_index_all", 
-    X=c("pre_lt", "temp_lt", "L1_prehishock", "L1_preloshock", "L1_temphishock"),
-    lab="Model D3")
-  )
+# Create a list of 72 model formulas
+models <- list()
+for (i in Y) for (j in 1:9) for (k in LETTERS[1:4]) {
+  models[[paste0(i, " ~ clim-", k, j)]] <- as.formula(switch(k,
+    A = paste0(i, "~", paste(c(X[[paste0("weather", j)]]), collapse="+")),
+    B = paste0(i, "~", paste(c(X[[paste0("weather", j)]], X$socio), collapse="+")),
+    C = paste0(i, "~", paste(c(X[[paste0("weather", j)]], X$socio, X$access, X$agri), collapse="+")),
+    D = paste0(i, "~", paste(c(X[[paste0("weather", j)]], X$socio, X$access, X$agri, X$other), collapse="+"))
+  ))
+}
+
+# Print first/last 2 formulas
+pander(models[c(1:2, 71:72)])
 
 ```
+
+```{r}
+
+# Verify that all vars included in these models exist in the dataset
+vars.missing <- setdiff(unlist(X,Y), dt2.lbl$varCode)
+vars.missing
+
+```
+
+**Nine vars** are missing so we need to reconstruct them or else drop the corresponding models from the analysis (done for now).
+
+```{r}
+
+# Drop models with missing vars
+models.drop <- sapply(models, str_locate, vars.missing)
+models.drop <- colSums(models.drop, na.rm=T)
+models <- models[models.drop==0]
+
+```
+
+This leaves **`r length(models)` models** to estimate.
+
 
 ### Imputations
 
-In R spatial regression commands require all `X` variables to be non-missing.
-Here we use simple region median value (or country in case regional median is
-missing).
+In R spatial regression commands require all predictor variables to be non-missing. Here we use simple region median value (or country in case regional median is missing). Other interpolation methods for missing values could be used (e.g. triangulation or kriging using district centroids). Since we are interpolating a biophysical phenomenon (SPEI) these techniques might indeed be more appropriate. 
 
-```{r}
+```{r impute}
 
 X <- unique(unlist(sapply(models, '[[', "X")))
 X
@@ -180,27 +269,59 @@ g2.dt[is.na(spei_lt), spei_lt := spei_lt_imp]
 # Verify
 g2.dt[is.na(spei_lt), .N, by=svyCode]
 
-
 # Tabulate
 
 
 # Re-attach imputed attributes to shapes
-g2 <- SpatialPolygonsDataFrame(g2, data.frame(g2.dt), match.ID=F)
+g2 <- SpatialPolygonsDataFrame(g2, data.frame(g2.dt), match.ID="rn")
 
 
 ```
 
 
+## Spatial Effects
+
+This section is to test for the presence of spatial autocorrelation in one or more of the predictors, and to choose a regression approach such that model residuals are not spatially autocorrelated (thus ensuring a better fit).
+
+
+### Moran's *I* Statistic
+
+
+```{r moran}
+
+moran.plot(g2.nb@data[, Y], w, zero.policy=T,
+  xlim=c(0, 200), ylim=c(0, 200),
+  xlab=dt2.lbl[Y, varLabel], 
+  ylab=paste("Spatially Lagged", Y))
+
+#plot(
+#  variogram(as.formula(paste(Y, "~1")), 
+#    locations=coordinates(g2.nb), data=g2.nb, cloud=F), 
+#  type="b", pch=16, main=paste("Variogram of", dt2.lbl[Y, varLabel]))
+
+moran.mc(g2.nb@data[, Y], w, zero.policy=T, nsim=999)
+
+moran.plot(g2.nb@data[, X[1]], w, zero.policy=T,
+  xlab=dt2.lbl[X[1], varLabel], 
+  ylab=paste("Spatially Lagged", X[1]))
+
+moran.mc(g2.nb@data[, X[1]], w, zero.policy=T, nsim=999)
+
+
+```
+
+
+
 ## Spatial Weights
 
-Need to choose between QUEEN contiguity or we can also choose the k-nearest points/shapes as neighbors using `knn2nb()` instead of `poly2nb()`.  Can also assign neighbors based on a specified distance using `dnearneigh()`.
+Need to choose between QUEEN or ROOK contiguity or else we can experiment with k-nearest points/shapes as neighbors using `knn2nb()` instead of `poly2nb()`. Can also assign neighbors based on a given distance threshold using `dnearneigh()`.
 
 Note that contiguity requires valid topology (which is surely not the case in this shapefile). Argument `snap` may be used to correct for slivers. Else one can use `edit(nn)` to make manual corrections to the matrix. Another approach to address non-contiguous splatial features is to use the feature centroid, or any weighted centroid (e.g. population weighted centroid of the admin unit).
 
 There's also the issue of choosing a method for the spatial weights (row-standardized, binary). Typically Row standardization is used to create proportional weights in cases where features have an unequal number of neighbors. Use Binary when you want comparable spatial parameters across different data sets with different connectivity structures.
  
 
-```{r}
+```{r weights}
 
 # Generate spatial neighbour list for SSA
 nb2 <- poly2nb(g2.nb, row.names=paste(g2.nb$ISO3, g2.nb$rn, sep="."))
@@ -296,39 +417,13 @@ w <- nb2listw(nb2, zero.policy=T)
 
 ```
 
-### Moran's I Statistic
-
-
-```{r moran}
-
-moran.plot(g2.nb@data[, Y], w, zero.policy=T,
-  xlim=c(0, 200), ylim=c(0, 200),
-  xlab=dt2.lbl[Y, varLabel], 
-  ylab=paste("Spatially Lagged", Y))
-
-#plot(
-#  variogram(as.formula(paste(Y, "~1")), 
-#    locations=coordinates(g2.nb), data=g2.nb, cloud=F), 
-#  type="b", pch=16, main=paste("Variogram of", dt2.lbl[Y, varLabel]))
-
-moran.mc(g2.nb@data[, Y], w, zero.policy=T, nsim=999)
-
-moran.plot(g2.nb@data[, X[1]], w, zero.policy=T,
-  xlab=dt2.lbl[X[1], varLabel], 
-  ylab=paste("Spatially Lagged", X[1]))
-
-moran.mc(g2.nb@data[, X[1]], w, zero.policy=T, nsim=999)
-
-
-```
 
 
 ## Spatial Regressions (OLS, LAG, SAC)
 
-Batch run all 12 models using OLS, LAG, and SAC regressions and save results to
-draw comparisons.
+Batch run all models using OLS, LAG, and SAC regressions and save results to draw comparisons.
 
-```{r models, cache=T}
+```{r spatreg, cache=T}
 
 # Drop admin units with missing outcome values (not included in model)
 g2.nb <- g2[!is.na(g2[[x]]),]
@@ -432,7 +527,7 @@ optimal bandwidth is unclear (check doco), also not clear how to choose a
 kernel function (default Gaussian).
 
 
-```{r gwr, cache=T}
+```{r gwr, cache=TRUE}
 
 # Load package
 library(spgwr)
@@ -459,24 +554,18 @@ for (i in X) {print(
 ```
 
 
-```{r ggwr, eval=F}
+```{r ggwr, eval=FALSE}
 
 # Could also try a GWR/GLM on same model as above
 bwG <- ggwr.sel(fm, data=g2.nb, gweight=gwr.Gauss, verbose=FALSE)
 gwrG <- ggwr(fm, data=g2.nb, bandwidth=bwG, gweight=gwr.Gauss, hatmatrix=TRUE,
   family="poisson")
 
-
-save.image("./temp/poverty_r16.05.RData")
-
 ```
 
+```{r save, eval=FALSE}
 
-```{r rpubs, eval=F, echo=F}
-require(rsconnect)
-res <- rpubsUpload("SSA Poverty", "./R/poverty_r16.05.html", "./R/poverty_r16.05.Rmd")
-if (!is.null(res$continueUrl)) browseURL(res$continueUrl) else stop(res$error)
-rpubsUpload("SSA Poverty", "./R/poverty_r16.05.html", "./R/poverty_r16.05.Rmd", id=res$id)
+save.image("./tmp/poverty_r16.05.RData")
 
 ```
 
