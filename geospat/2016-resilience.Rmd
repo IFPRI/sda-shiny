@@ -2,6 +2,7 @@
 title:  "Resilience Analysis - Ghana, Tanzania, Uganda"
 author: "IFPRI/HarvestChoice"
 date:   "Oct. 2016. Last updated on `r Sys.Date()`. DRAFT, do not use or cite!"
+runtime: shiny
 output:
   html_document:
     fig_caption: yes
@@ -26,7 +27,7 @@ load("./tmp/resilience.RData")
 
 ```
 
-```{r helper, collapse=TRUE}
+```{r helper}
 
 # Display options
 library(pander)

@@ -10,7 +10,6 @@ library(shiny)
 library(shinyBS)
 library(data.table)
 library(rgdal)
-library(reshape2)
 library(leaflet)
 library(dygraphs)
 
@@ -70,12 +69,12 @@ d <- d[1:3]
 data <- readRDS("./tmp/dt2.rds")
 
 # Load GAUL 2014 district boundaries
-g2 <- readRDS("/home/projects/hc-cell5m/rdb/g2_2014v15.web.rds")
+g2 <- readRDS("/home/projects/hc-data/Admin/g2_2014v15.web.rds")
 g2.dt <- data.table(g2@data)[, .N, by=list(ADM0_CODE, ADM0_NAME)]
 setkey(g2.dt, ADM0_NAME)
 
 # Load GAUL 2012v13 country boundaries for plotting (with water bodies cut out)
-g0 <- readRDS("/home/projects/hc-cell5m/rdb/g0.epsg3857.rds")
+g0 <- readRDS("/home/projects/hc-data/Admin/g0.epsg3857.rds")
 
 # Load country/province/district list to populate controls
-g2.list <- readRDS("/home/projects/hc-cell5m/rdb/g2_2014v15.list.rds")
+g2.list <- readRDS("/home/projects/hc-data/Admin/g2_2014v15.list.rds")

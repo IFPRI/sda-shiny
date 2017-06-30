@@ -22,8 +22,7 @@ hcapi.version <- packageVersion("hcapi3")
 # Also check if files currently exist
 f <- list.files("../www/bulk", "*.csv", recursive=T)
 
-if( tmp!=hcapi.version | length(f)==0 ) {
-  # If not, re-create
+if( tmp!=hcapi.version || length(f)==0 ) {
 
   # Clean up
   unlink("../www/bulk/*")
@@ -56,5 +55,9 @@ if( tmp!=hcapi.version | length(f)==0 ) {
 
   hcapi.bulk <- split(hcapi.bulk, hcapi.bulk$cat1)
   save(hcapi.version, hcapi.bulk, file="./tmp/cell5mBulk.RData")
+  cat("Succesfull recreated all packaged downloads and updated `./tmp/cell5mBulk.RData` workspace.")
+
+} else {
+  cat("Nothing to do. Current version is the same as latest version.")
 }
 

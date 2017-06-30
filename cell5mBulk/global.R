@@ -7,6 +7,7 @@
 
 library(data.table)
 library(hcapi3)
+library(shiny)
 
 #setwd("./cell5mBulk")
 load("./tmp/cell5mBulk.RData")

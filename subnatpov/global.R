@@ -74,7 +74,7 @@ years <- data.table(m@data)[order(-year), list(year=unique(year)), keyby=ISO3]
 def <- c("circa 2008", "circa 2005")
 
 # GAUL Country boundaries for plotting (water bodies cut out)
-g0 <- readRDS("/home/projects/hc-cell5m/rdb/g0.epsg3857.rds")
+g0 <- readRDS("/home/projects/hc-data/Admin/g0.epsg3857.rds")
 
 # Helper - Formatter for rhandsometable
 convertNA <- function() htmlwidgets::JS(
