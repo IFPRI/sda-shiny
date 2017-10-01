@@ -12,7 +12,7 @@ shinyServer(function(input, output, session) {
   values <- reactiveValues(iso3="SSA")
   output$map <- renderLeaflet(m)
 
-  # Update country select
+  # Update country selectize
   observeEvent(input$selectISO3, values$iso3 <- input$selectISO3)
 
   observe({

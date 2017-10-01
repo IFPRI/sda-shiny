@@ -22,7 +22,7 @@ load("./tmp/traveltime.RData")
 # Keys
 # AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck
 api_key_goog <- "AIzaSyDtQ4aW92HbdUOwDfgtKUrEngIfgoJSThA"
-api_key_here <- c(app_id="JyAEQWONPJRdajOHClCc", app_code="eCV-jVYOlYybP1cALBLe-g")
+api_key_here <- c(app_id="yoEsgoeV2F1gs6I6fBLS", app_code="SkehYA58D7gL_RQAR21BXg")
 
 apiList <- c(
   `Do not compare`="NONE",
