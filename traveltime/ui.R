@@ -48,12 +48,19 @@ shinyUI(fluidPage(
         a("Google", href="https://developers.google.com/maps/documentation/distance-matrix/usage-limits"),
         "and",
         a("HERE", href="https://developer.here.com/rest-apis/documentation/routing/topics/quick-start.html"),
+        "or",
+        a("MAPZEN", href="https://mapzen.com/documentation/mobility/matrix/api-reference/"),
         "APIs. Without a key requests are limited to 200 pairs of locations. Please use the
         links here and register if needed."),
 
       textInput("txtKeyGOOG", "Your Google API key",
         placeholder="Sign in with Google and enter your API key"),
       actionLink("btnKeyGOOG", "update key", icon("refresh")),
+
+      p(br()),
+      textInput("txtKeyMAPZ", "Your Mapzen API key",
+        placeholder="Sign in with Mapzen and enter your API key"),
+      actionLink("btnKeyMAPZ", "update key", icon("refresh")),
 
       p(br(), "HERE API requires both an App ID and an App Code."),
 

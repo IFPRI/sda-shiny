@@ -14,7 +14,7 @@ library(leaflet.extras)
 library(jsonlite)
 library(httr)
 library(listviewer) # pretty print complex lists
-library(rhandsontable) # pretty tables
+library(rhandsontable)
 
 
 load("./tmp/traveltime.RData")

@@ -20,15 +20,16 @@ setwd("~/Projects/hc-shiny/traveltime")
 load("./tmp/traveltime.RData")
 
 # Keys
-# AIzaSyDFB0iBHCv7L3apVbHfXOJb5fwRJecSkck
 api_key_goog <- "AIzaSyDtQ4aW92HbdUOwDfgtKUrEngIfgoJSThA"
 api_key_here <- c(app_id="yoEsgoeV2F1gs6I6fBLS", app_code="SkehYA58D7gL_RQAR21BXg")
+api_key_mapz <- "mapzen-2tHwmDH"
 
 apiList <- c(
   `Do not compare`="NONE",
   `Google Distance Matrix`="GOOG",
   `HERE Routing Matrix`="HERE",
-  `Open Source Routing Machine`="OSRM"
+  `Open Source Routing Machine`="OSRM",
+  `Mapzen Time-Distance Matrix`="MAPZ"
 )
 
 # Get HarvestChoice travel time rasters and create tiles
@@ -61,6 +62,7 @@ View(tmp$data)
 
 # Save this workspace for the TravelTime visualization
 rm(list=ls()[!ls() %in% c("initGPS", "initResults", "api_key_goog", "api_key_here",
+  "api_key_mapz",
   "apiList", "je_simple_style")])
 
 save.image("./tmp/traveltime.RData")

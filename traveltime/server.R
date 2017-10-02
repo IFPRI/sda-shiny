@@ -1,5 +1,5 @@
 #####################################################################################
-# Title:   Utilities to interact with Google Distance Matrix, HERE, and OSRM APIs
+# Title:   Utilities to interact with Google Distance Matrix, HERE, OSRM, MAPZEN APIs
 # Date:    November 2016
 # Project: HarvestChoice/IFPRI
 # Authors: Bacou, Melanie <mel@mbacou.com>
@@ -159,9 +159,10 @@ osrm_api <- function(f, t, key=NULL) {
     query=list(
       sources=paste(1:nrow(f)-1, collapse=";"),
       destinations=paste(nrow(f):(nrow(f)+nrow(t)-1), collapse=";")))
-  out <- fromJSON(content(out, as="text"), flatten=T)
+  out <- try(fromJSON(content(out, as="text"), flatten=TRUE))
 
-  if(is.null(out$durations)) return(list(response=out, data=dt))
+  if(class(out)=="try-error" | is.null(out$durations)) return(list(response=out, data=dt))
+
   dt <- as.data.table(out$durations)
   dt[, from := f$ID]
   setnames(dt, c(t$ID, "from"))
@@ -183,6 +184,71 @@ osrm_api <- function(f, t, key=NULL) {
   return(list(response=out, data=dt))
 }
 
+#####################################################################################
+# Helper - MAPZEN Time-Distance Matrix
+#####################################################################################
+mapz_api <- function(f, t, key) {
+
+  # Make empty table structure
+  dt <- data.table(
+    from = character(),
+    to = character(),
+    dist_km = numeric(),
+    time_str = character(0),
+    time_hrs = numeric(),
+    X_from = numeric(),
+    Y_from = numeric(),
+    X_to = numeric(),
+    Y_to = numeric()
+  )
+
+  url <- "https://matrix.mapzen.com/sources_to_targets"
+  l <- list(
+    sources=f[, .(lat=Y, lon=X)],
+    targets=t[, .(lat=Y, lon=X)],
+    costing="auto"
+  )
+  out <- GET(url, query=list(
+    json=toJSON(l, dataframe="rows", auto_unbox=TRUE, digits=8),
+    api_key=key)
+  )
+  out <- try(fromJSON(content(out, as="text"), flatten=TRUE))
+  if(class(out)=="try-error" | is.null(out$sources_to_targets)) return(list(response=out, data=dt))
+
+  dt <- rbindlist(out$sources_to_targets)
+  f[, from_index := (1:.N)-1]
+  t[, to_index := (1:.N)-1]
+
+  setkey(f, from_index)
+  setkey(dt, from_index)
+  dt[f, `:=`(
+    from = i.ID,
+    X_from = i.X,
+    Y_from = i.Y
+  )]
+
+  setkey(t, to_index)
+  setkey(dt, to_index)
+  dt[t, `:=`(
+    to = i.ID,
+    X_to = i.X,
+    Y_to = i.Y
+  )]
+
+  dt[, `:=`(
+    time_str = sprintf("%s hrs %s min", time %/% (60*60), time %% (60*60) %/% 60),
+    time_hrs = time/(60*60),
+    dist_km = distance,
+    to_index = NULL,
+    from_index = NULL,
+    time = NULL,
+    distance = NULL
+  )]
+  setcolorder(dt, c("from", "to", "dist_km", "time_str", "time_hrs", "X_from", "Y_from", "X_to", "Y_to"))
+
+  return(list(response=out, data=dt))
+}
+
 
 #####################################################################################
 # Helper - Make Polylines
@@ -200,10 +266,9 @@ toPolyLines <- function(x, coords) {
 #####################################################################################
 # Helper - Validate points from CSV strings
 #####################################################################################
-
 mapPoints <- function(x, group, session=NULL) {
 
-  # Empty table
+  # Init table
   dt.na <- data.table(ID=as.character(), X=numeric(), Y=numeric())
 
   closeAlert(session, "alert1")
@@ -235,8 +300,6 @@ mapPoints <- function(x, group, session=NULL) {
 
 
 
-
-
 #####################################################################################
 # Main
 #####################################################################################
@@ -251,6 +314,7 @@ shinyServer(function(input, output, session) {
     api2 = "NONE",
     api_key_goog = api_key_goog,
     api_key_here = api_key_here,
+    api_key_mapz = api_key_mapz,
     mapTitle = "Google Distance Matrix",
     res = initResults
   )
@@ -310,8 +374,6 @@ shinyServer(function(input, output, session) {
           "Travel Times 20k", "Travel Times 50k", "Travel Times 100k"),
         position="bottomleft",
         options=layersControlOptions(collapsed=F))
-
-
   )
 
   # Add dynamic point layers (react on values$dtFrom)
@@ -348,25 +410,25 @@ shinyServer(function(input, output, session) {
   # Results
   output$tbResults <- renderRHandsontable(switch(values$api1,
     GOOG = rhandsontable(values$res$data[, .SD, .SDcols=-c(5,7)],
-      colHeaders=c("From", "To", "Status", "Distance", "Time",
-        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      colHeaders=c("From", "To", "Status", "Distance", "Time", "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
       height=min(40+nrow(values$res$data)*22, 487),
       readOnly=T, width="100%", stretchH="all"),
     HERE = rhandsontable(values$res$data,
-      colHeaders=c("From", "To", "Cost Factor",
-        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      colHeaders=c("From", "To", "Cost Factor", "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
       height=min(40+nrow(values$res$data)*22, 487),
       readOnly=T, width="100%", stretchH="all"),
     OSRM = rhandsontable(values$res$data[, .SD, .SDcols=-c(4)],
-      colHeaders=c("From", "To", "Time",
-        "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      colHeaders=c("From", "To", "Time", "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
       height=min(40+nrow(values$res$data)*22, 487),
       readOnly=T, width="100%", stretchH="all"),
+    MAPZ = rhandsontable(values$res$data[, .SD, .SDcols=-c(5)],
+      colHeaders=c("From", "To", "Distance", "Time", "Lng (From)", "Lat (From)", "Lng (To)", "Lat (To)"),
+      height=min(40+nrow(values$res$data)*22, 487),
+      readOnly=T, width="100%", stretchH="all")
   ))
 
   # JSON responses
   output$jsResults <- renderJsonedit(jsonedit(values$res$response))
-
 
   # Primary observer (react to main button)
   observeEvent(input$btnMain, {
@@ -390,6 +452,8 @@ shinyServer(function(input, output, session) {
     if(length(input$btnKeyGOOG)>8) values$api_key_goog <- input$txtKeyGOOG)
   observeEvent(input$btnKeyHERE,
     if(length(input$btnKeyHERE)>8) values$api_key_here <- c(input$txtKeyHEREid, input$txtKeyHEREcode))
+  observeEvent(input$btnKeyMAPZ,
+    if(length(input$btnKeyMAPZ)>8) values$api_key_mapz <- input$txtKeyMAPZ)
 
   # show distance labels on click
   observeEvent(input$map_marker_click, {
@@ -416,7 +480,9 @@ shinyServer(function(input, output, session) {
         label=~switch(values$api1,
           GOOG=gsub("NA", "--", paste(dist_str, time_str, sep=" | ")),
           HERE=gsub("NA", "--", prettyNum(cost, big.mark=",")),
-          OSRM=gsub("NA", "--", time_str)),
+          OSRM=gsub("NA", "--", time_str),
+          MAPZ=gsub("NA", "--", paste(dist_km, time_str, sep=" | "))
+          ),
         labelOptions=labelOptions(noHide=T, direction="top"),
         group="Distances")
 
@@ -443,9 +509,9 @@ shinyServer(function(input, output, session) {
     values$dtTo <- to
 
     # Do not send more than 200 requests
-    apilimit <- ifelse(values$api_key_goog==api_key_goog, 200, 1000)
+    apilimit <- ifelse(values$api_key_goog==api_key_goog | values$api_key_mapz==api_key_mapz, 200, 1000)
 
-    if (nrow(from) > 0 && nrow(to)>0 && nrow(from)*nrow(to) <= apilimit) {
+    if (nrow(from) > 0 && nrow(to) > 0 && nrow(from)*nrow(to) <= apilimit) {
       # Hit API
       values$api1 <- input$selectAPI1
 
@@ -468,7 +534,13 @@ the overall quality of the route with respect to the input parameters.")
         OSRM = {
           values$res <- osrm_api(from, to)
           output$txtNoteHERE <- renderText("")
-        })
+        },
+
+        MAPZ = {
+          values$res <- mapz_api(from, to, values$api_key_mapz)
+          output$txtNoteHERE <- renderText("")
+        }
+      )
 
     } else {
       # Raise alert
