@@ -35,15 +35,15 @@ shinyUI(fluidPage(
     column(4,
 
       p(br()),
-      p("Use this tool to send (bulk) requests to travel distance and routing APIs provided
-        by Google, HERE, and OpenStreetMap."),
+      p("Use this tool to send and compare results from (bulk) requests to travel distance APIs provided
+        by Google, HERE, MAPZEN, and OpenStreetMap."),
       selectInput("selectAPI1", "Select a service to use",
         apiList[-1], selected="GOOG"),
       # selectInput("selectAPI2", "Optionally, compare with this service",
       #   apiList, selected="NONE"),
 
       hr(),
-      p("You will need to provide", strong("your own API keys"), "to send large requests
+      p("You will need to provide", strong("your own API keys"), "to send larger requests
         to",
         a("Google", href="https://developers.google.com/maps/documentation/distance-matrix/usage-limits"),
         "and",
@@ -58,6 +58,7 @@ shinyUI(fluidPage(
       actionLink("btnKeyGOOG", "update key", icon("refresh")),
 
       p(br()),
+
       textInput("txtKeyMAPZ", "Your Mapzen API key",
         placeholder="Sign in with Mapzen and enter your API key"),
       actionLink("btnKeyMAPZ", "update key", icon("refresh")),
@@ -70,7 +71,6 @@ shinyUI(fluidPage(
         placeholder="Sign in with HERE and enter your API key"),
       actionLink("btnKeyHERE", "update key", icon("refresh")),
 
-      # Credits
       hr(),
       includeMarkdown("./www/txtCredits.md"),
       p(br())
